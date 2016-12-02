@@ -40,6 +40,7 @@
 #if defined(_OPENMP)
 # include <omp.h>
 #endif
+#include "mm_io.h"
 #if defined(_WIN32) || defined(__CYGWIN__)
 /* note: this does not reproduce 48-bit RNG quality */
 # define drand48() ((double)rand() / RAND_MAX)
@@ -187,7 +188,9 @@ int main(int argc, char **argv)
   M = 0; N = 0; K = 0; alpha = (real)1.0; beta = (real)1.0;   reps = 0; transA = 'N'; transB = 'N';
 
   if (argc > 1 && !strncmp(argv[1], "-h", 3)) {
-    printf("\nUsage: ./block_gemm [M] [N] [K] [transA] [transB] [reps]\n\n");
+    printf("\nUsage: %s [M] [N] [K] [transA] [transB] [reps]\n", argv[0]);
+    printf("or\n");
+    printf(  "       %s [input file in matrix market format] [N] [transA] [transB] [reps]\n\n", argv[0]);
     return 0;
   }
 
@@ -200,10 +203,51 @@ int main(int argc, char **argv)
   reps = 100;
 
   /* reading new values from cli */
+  int read_from_file = 0;
+  FILE *fp = NULL;
+  MM_typecode matcode;
   i = 1;
-  if (argc > i) M      = atoi(argv[i++]);
+  if (argc > i) {
+    M      = atoi(argv[i]);
+
+    char buf[1024];
+    sprintf(buf, "%d", M);
+    read_from_file = strcmp(buf, argv[i]) != 0;
+
+    ++i;
+  }
   if (argc > i) N      = atoi(argv[i++]);
-  if (argc > i) K      = atoi(argv[i++]);
+  if (!read_from_file) {
+    if (argc > i) K      = atoi(argv[i++]);
+  }
+  else {
+    fp = fopen(argv[1], "r");
+    if (NULL == fp) {
+      fprintf(stderr, "Failed to open file %s\n", argv[1]);
+      return 0;
+    }
+
+    /* read banner */
+    if (mm_read_banner(fp, &matcode) != 0) {
+      fprintf(stderr, "Could not process Matrix Market banner.\n");
+      fclose(fp);
+      return 0;
+    }
+
+    if (!mm_is_valid(matcode) || mm_is_array(matcode) || mm_is_dense(matcode)) {
+      fprintf(stderr, "Only support sparse and real matrices.\n");
+      fclose(fp);
+      return 0;
+    }
+
+    /* read sizes */
+    int nnz;
+    if (mm_read_mtx_crd_size(fp, &M, &K, &nnz) != 0) {
+      fprintf(stderr, "Could not read matrix size.\n");
+      fclose(fp);
+      return 0;
+    }
+  }
   if (argc > i) { transA = argv[i][0]; i++; }
   if (argc > i) { transB = argv[i][0]; i++; }
   if (argc > i) reps   = atoi(argv[i++]);
@@ -217,17 +261,38 @@ int main(int argc, char **argv)
   /* Step 3: init data */
   srand48(1);
   size_t l;
-  for ( l = 0; l < (size_t)M * (size_t)N; l++ ) {
-    double random = drand48();
-    #ifdef USE_BFLOAT
-    float  random_f = (float)random;
-    int    random_int = *(int *)(&random_f);
-    uint16_t val = (random_int>>16);
-    #else
-    float  val = (float)random;
-    #endif
-    if(random > 0.85) A_gold[l] = val;
-    else              A_gold[l] = (real)0.0;
+  if (read_from_file) {
+    memset(A_gold, 0, M*K*sizeof(real));
+
+    int pattern = mm_is_pattern(matcode);
+    int i, j;
+    double re, im;
+    while (mm_read_mtx_crd_entry(fp, &i, &j, &re, &im, matcode) == 0) {
+      if (i > M || j > K || i == 0 || j == 0) {
+        fprintf(stderr, "(%d, %d) coordinate is out of range.\n", i, j);
+        fclose(fp);
+        return 0;
+      }
+
+      A_gold[(i - 1)*K + (j - 1)] = pattern ? 1 : re;
+        /* assume 1-based indexing in matrix market file */
+    }
+
+    fclose(fp);
+  }
+  else {
+    for ( l = 0; l < (size_t)M * (size_t)N; l++ ) {
+      double random = drand48();
+      #ifdef USE_BFLOAT
+      float  random_f = (float)random;
+      int    random_int = *(int *)(&random_f);
+      uint16_t val = (random_int>>16);
+      #else
+      float  val = (float)random;
+      #endif
+      if(random > 0.85) A_gold[l] = val;
+      else              A_gold[l] = (real)0.0;
+    }
   }
 
   for ( l = 0; l < (size_t)K * (size_t)N; l++ ) {
