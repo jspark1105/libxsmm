@@ -180,7 +180,7 @@ int main(int argc, char **argv)
 
   /* Step 1: Read in args */
   unsigned long long start, end;
-  double flops;
+  double effective_flops, actual_flops;
   char transA, transB;
   int i, j, k;
 
@@ -294,6 +294,10 @@ int main(int argc, char **argv)
       else              A_gold[l] = (real)0.0;
     }
   }
+  size_t nnz = 0;
+  for ( l = 0; l < (size_t)M * (size_t)K; l++ ) {
+    if (A_gold[l] != 0.) ++nnz;
+  }
 
   for ( l = 0; l < (size_t)K * (size_t)N; l++ ) {
     double random = drand48();
@@ -312,7 +316,8 @@ int main(int argc, char **argv)
   for ( l = 0; l < (size_t)M * (size_t)N; l++ ) {
     C[l]      = (real)0.0;
   }
-  flops = (double)M * (double)N * (double)K * 2.0;
+  effective_flops = (double)M * (double)N * (double)K * 2.0;
+  actual_flops = (double)nnz * (double)N * 2.0;
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   /* Step 4: Initialize libxsmm for these sizes - allocates handle and temporary space for the sparse data structure for A */
@@ -377,7 +382,7 @@ int main(int argc, char **argv)
 #   endif
   }
   end = libxsmm_timer_tick();
-  printf("Time = %lf Time/rep = %lf, TFlops/s = %lf\n", libxsmm_timer_duration(start, end), libxsmm_timer_duration(start, end)*1.0/reps, flops/1000./1000./1000./1000./libxsmm_timer_duration(start, end)*reps);
+  printf("Time = %lf Time/rep = %lf, Effective TFlops/s = %lf, Actual TFlops/s = %lf\n", libxsmm_timer_duration(start, end), libxsmm_timer_duration(start, end)*1.0/reps, effective_flops/1000./1000./1000./1000./libxsmm_timer_duration(start, end)*reps, actual_flops/1000./1000./1000./1000./libxsmm_timer_duration(start, end)*reps);
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   /* Step 5: Initialize libxsmm for transpose A - allocates handle and temporary space for the sparse data structure for A */
@@ -418,7 +423,7 @@ int main(int argc, char **argv)
 #   endif
   }
   end = libxsmm_timer_tick();
-  printf("Time = %lf Time/rep = %lf, TFlops/s = %lf\n", libxsmm_timer_duration(start, end), libxsmm_timer_duration(start, end)*1.0/reps, flops/1000./1000./1000./1000./libxsmm_timer_duration(start, end)*reps);
+  printf("Time = %lf Time/rep = %lf, Effective TFlops/s = %lf, Actual TFlops/s = %lf\n", libxsmm_timer_duration(start, end), libxsmm_timer_duration(start, end)*1.0/reps, effective_flops/1000./1000./1000./1000./libxsmm_timer_duration(start, end)*reps, actual_flops/1000./1000./1000./1000./libxsmm_timer_duration(start, end)*reps);
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   /* Step 6: Test transpose B  */
@@ -456,7 +461,7 @@ int main(int argc, char **argv)
 #   endif
   }
   end = libxsmm_timer_tick();
-  printf("Time = %lf Time/rep = %lf, TFlops/s = %lf\n", libxsmm_timer_duration(start, end), libxsmm_timer_duration(start, end)*1.0/reps, flops/1000./1000./1000./1000./libxsmm_timer_duration(start, end)*reps);
+  printf("Time = %lf Time/rep = %lf, Effective TFlops/s = %lf, Actual TFlops/s = %lf\n", libxsmm_timer_duration(start, end), libxsmm_timer_duration(start, end)*1.0/reps, effective_flops/1000./1000./1000./1000./libxsmm_timer_duration(start, end)*reps, actual_flops/1000./1000./1000./1000./libxsmm_timer_duration(start, end)*reps);
 
  return 0;
 }
