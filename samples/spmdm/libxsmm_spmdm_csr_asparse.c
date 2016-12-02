@@ -281,7 +281,7 @@ int main(int argc, char **argv)
     fclose(fp);
   }
   else {
-    for ( l = 0; l < (size_t)M * (size_t)N; l++ ) {
+    for ( l = 0; l < (size_t)M * (size_t)K; l++ ) {
       double random = drand48();
       #ifdef USE_BFLOAT
       float  random_f = (float)random;
