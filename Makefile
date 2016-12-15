@@ -45,7 +45,7 @@ VERSION_MAJOR ?= $(shell $(PYTHON) $(SCRDIR)/libxsmm_utilities.py 1)
 VERSION_MINOR ?= $(shell $(PYTHON) $(SCRDIR)/libxsmm_utilities.py 2)
 
 # THRESHOLD problem size (M x N x K) determining when to use BLAS; can be zero
-THRESHOLD ?= $(shell echo $$((80 * 80 * 80)))
+THRESHOLD ?= $(shell echo $$((128 * 128 * 128)))
 
 # Generates M,N,K-combinations for each comma separated group e.g., "1, 2, 3" gnerates (1,1,1), (2,2,2),
 # and (3,3,3). This way a heterogeneous set can be generated e.g., "1 2, 3" generates (1,1,1), (1,1,2),
@@ -222,11 +222,11 @@ endif
 INDICES ?= $(shell $(PYTHON) $(SCRDIR)/libxsmm_utilities.py -1 $(THRESHOLD) $(words $(MNK)) $(MNK) $(words $(M)) $(words $(N)) $(M) $(N) $(K))
 NINDICES = $(words $(INDICES))
 
-HEADERS = $(shell ls -1 $(SRCDIR)/*.h 2> /dev/null | tr "\n" " ") \
-          $(shell ls -1 $(SRCDIR)/template/*.c 2> /dev/null | tr "\n" " ") \
-          $(SRCDIR)/libxsmm_gemm_diff.c $(SRCDIR)/libxsmm_hash.c \
-          $(ROOTDIR)/include/libxsmm_dnn.h \
+HEADERS = $(shell ls -1 $(SRCDIR)/template/*.c 2> /dev/null | tr "\n" " ") \
+          $(shell ls -1 $(SRCDIR)/*.h 2> /dev/null | tr "\n" " ") \
+          $(SRCDIR)/libxsmm_hash.c $(SRCDIR)/libxsmm_gemm_diff.c \
           $(ROOTDIR)/include/libxsmm_cpuid.h \
+          $(ROOTDIR)/include/libxsmm_dnn.h \
           $(ROOTDIR)/include/libxsmm_frontend.h \
           $(ROOTDIR)/include/libxsmm_generator.h \
           $(ROOTDIR)/include/libxsmm_intrinsics_x86.h \
@@ -236,32 +236,24 @@ HEADERS = $(shell ls -1 $(SRCDIR)/*.h 2> /dev/null | tr "\n" " ") \
           $(ROOTDIR)/include/libxsmm_sync.h \
           $(ROOTDIR)/include/libxsmm_timer.h \
           $(ROOTDIR)/include/libxsmm_typedefs.h
+SRCFILES_LIB = $(patsubst %,$(SRCDIR)/%, \
+          libxsmm_main.c libxsmm_cpuid_x86.c libxsmm_malloc.c \
+          libxsmm_sync.c libxsmm_dump.c libxsmm_timer.c libxsmm_perf.c \
+          libxsmm_gemm.c libxsmm_trans.c libxsmm_spmdm.c \
+          libxsmm_dnn.c libxsmm_dnn_handle.c \
+          libxsmm_dnn_convolution_forward.c \
+          libxsmm_dnn_convolution_backward.c \
+          libxsmm_dnn_convolution_weight_update.c)
 
 SRCFILES_KERNELS = $(patsubst %,$(BLDDIR)/mm_%.c,$(INDICES))
-SRCFILES_GEN_LIB = $(patsubst %,$(SRCDIR)/%,$(wildcard $(SRCDIR)/generator_*.c) \
-                   libxsmm_cpuid_x86.c libxsmm_malloc.c libxsmm_sync.c \
-                   libxsmm_timer.c libxsmm_trace.c libxsmm_perf.c)
+SRCFILES_GEN_LIB = $(patsubst %,$(SRCDIR)/%,$(wildcard $(SRCDIR)/generator_*.c) libxsmm_trace.c)
 SRCFILES_GEN_GEMM_BIN = $(patsubst %,$(SRCDIR)/%,libxsmm_generator_gemm_driver.c)
 SRCFILES_GEN_CONV_BIN = $(patsubst %,$(SRCDIR)/%,libxsmm_generator_convolution_driver.c)
 OBJFILES_GEN_GEMM_BIN = $(patsubst %,$(BLDDIR)/intel64/%.o,$(basename $(notdir $(SRCFILES_GEN_GEMM_BIN))))
 OBJFILES_GEN_CONV_BIN = $(patsubst %,$(BLDDIR)/intel64/%.o,$(basename $(notdir $(SRCFILES_GEN_CONV_BIN))))
 OBJFILES_GEN_LIB = $(patsubst %,$(BLDDIR)/intel64/%.o,$(basename $(notdir $(SRCFILES_GEN_LIB))))
-OBJFILES_HST = $(BLDDIR)/intel64/libxsmm_main.o $(BLDDIR)/intel64/libxsmm_dump.o \
-               $(BLDDIR)/intel64/libxsmm_gemm.o $(BLDDIR)/intel64/libxsmm_trans.o \
-               $(BLDDIR)/intel64/libxsmm_spmdm.o \
-               $(BLDDIR)/intel64/libxsmm_dnn.o $(BLDDIR)/intel64/libxsmm_dnn_handle.o \
-               $(BLDDIR)/intel64/libxsmm_dnn_convolution_forward.o \
-               $(BLDDIR)/intel64/libxsmm_dnn_convolution_backward.o \
-               $(BLDDIR)/intel64/libxsmm_dnn_convolution_weight_update.o
-OBJFILES_MIC = $(BLDDIR)/mic/libxsmm_main.o $(BLDDIR)/mic/libxsmm_dump.o \
-               $(BLDDIR)/mic/libxsmm_gemm.o $(BLDDIR)/mic/libxsmm_trans.o \
-               $(BLDDIR)/mic/libxsmm_dnn.o $(BLDDIR)/mic/libxsmm_dnn_handle.o \
-               $(BLDDIR)/mic/libxsmm_dnn_convolution_forward.o \
-               $(BLDDIR)/mic/libxsmm_dnn_convolution_backward.o \
-               $(BLDDIR)/mic/libxsmm_dnn_convolution_weight_update.o \
-               $(BLDDIR)/mic/libxsmm_cpuid_x86.o $(BLDDIR)/mic/libxsmm_malloc.o \
-               $(BLDDIR)/mic/libxsmm_sync.o $(BLDDIR)/mic/libxsmm_timer.o \
-               $(BLDDIR)/mic/libxsmm_trace.o $(BLDDIR)/mic/libxsmm_perf.o
+OBJFILES_HST = $(patsubst %,$(BLDDIR)/intel64/%.o,$(basename $(notdir $(SRCFILES_LIB))))
+OBJFILES_MIC = $(patsubst %,$(BLDDIR)/mic/%.o,$(basename $(notdir $(SRCFILES_LIB))))
 KRNOBJS_HST  = $(patsubst %,$(BLDDIR)/intel64/mm_%.o,$(INDICES))
 KRNOBJS_MIC  = $(patsubst %,$(BLDDIR)/mic/mm_%.o,$(INDICES))
 EXTOBJS_HST  = $(BLDDIR)/intel64/libxsmm_ext.o \
@@ -289,6 +281,12 @@ all: libxsmm samples
 
 .PHONY: headers
 headers: cheader cheader_only fheader
+
+.PHONY: header-only
+header-only: cheader_only
+
+.PHONY: header_only
+header_only: header-only
 
 .PHONY: interface
 interface: headers module

@@ -48,7 +48,9 @@
 #endif
 
 /** Helper macro to account for libxsmm_init being already executed via GCC constructor attribute */
-#if !defined(LIBXSMM_CTOR) && defined(__GNUC__) && !(defined(__INTEL_COMPILER) && !defined(LIBXSMM_BUILD))
+#if !defined(LIBXSMM_CTOR) && defined(__GNUC__) && \
+    !(defined(__INTEL_COMPILER) && !defined(LIBXSMM_BUILD)) && \
+    !defined(__clang__)
 # if defined(LIBXSMM_BUILD_EXT) && defined(__STATIC)
 #   define LIBXSMM_INIT libxsmm_ext_init/*dummy*/ = libxsmm_init;
     /**
@@ -165,6 +167,7 @@ struct LIBXSMM_RETARGETABLE libxsmm_dnn_conv_handle {
   int upd_ofh_rb;
   int fm_lp_block;              /* additional blocking for low precision datatypes of feature maps */
   int upd_use_thread_fil;
+  int filter_transposed;
 
   /* internal data representation */
   libxsmm_dnn_buffer* input;
@@ -254,8 +257,8 @@ LIBXSMM_API void libxsmm_build(const libxsmm_build_request* request, unsigned re
 /** Updates counters of the statistic, which is shown at program termination. */
 LIBXSMM_API unsigned int libxsmm_update_mmstatistic(int flags, int m, int n, int k, unsigned int ntry, unsigned int ncol);
 
-LIBXSMM_API int libxsmm_gemm_prefetch2uid(int prefetch);
-LIBXSMM_API int libxsmm_gemm_uid2prefetch(int uid);
+LIBXSMM_API int libxsmm_gemm_prefetch2uid(libxsmm_gemm_prefetch_type prefetch);
+LIBXSMM_API libxsmm_gemm_prefetch_type libxsmm_gemm_uid2prefetch(int uid);
 
 LIBXSMM_API size_t libxsmm_dnn_typesize(libxsmm_dnn_datatype datatype);
 
