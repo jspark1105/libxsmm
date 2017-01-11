@@ -1,5 +1,5 @@
 /******************************************************************************
-** Copyright (c) 2016, Intel Corporation                                     **
+** Copyright (c) 2016-2017, Intel Corporation                                **
 ** All rights reserved.                                                      **
 **                                                                           **
 ** Redistribution and use in source and binary forms, with or without        **
@@ -315,8 +315,8 @@ LIBXSMM_API_DEFINITION libxsmm_dnn_err_t libxsmm_dnn_internal_create_conv_handle
         descriptor.unroll_kh = 0;
         descriptor.unroll_kw = 0;
       }
-      descriptor.ifh_padded = handle->desc.H;
-      descriptor.ifw_padded = handle->desc.W;
+      descriptor.ifh_padded = handle->ifhp;
+      descriptor.ifw_padded = handle->ifwp;
       descriptor.kh = handle->desc.R;
       descriptor.kw = handle->desc.S;
       descriptor.stride_h = handle->desc.u;
@@ -366,8 +366,8 @@ LIBXSMM_API_DEFINITION libxsmm_dnn_err_t libxsmm_dnn_internal_create_conv_handle
     }
     /* Backward path */
     { libxsmm_convolution_backward_descriptor descriptor;
-      descriptor.ifh_padded = handle->desc.H;
-      descriptor.ifw_padded = handle->desc.W;
+      descriptor.ifh_padded = handle->ifhp;
+      descriptor.ifw_padded = handle->ifwp;
       descriptor.kh = handle->desc.R;
       descriptor.kw = handle->desc.S;
       descriptor.unroll_kw = 1;
@@ -559,8 +559,8 @@ LIBXSMM_API_DEFINITION libxsmm_dnn_err_t libxsmm_dnn_internal_create_conv_handle
     } /* End of backward */
     /* TODO weight update path */
     { libxsmm_convolution_weight_update_descriptor descriptor;
-      descriptor.ifh_padded = handle->desc.H;
-      descriptor.ifw_padded = handle->desc.W;
+      descriptor.ifh_padded = handle->ifhp;
+      descriptor.ifw_padded = handle->ifwp;
       descriptor.ofm_block = handle->ofmblock;
       descriptor.ifm_block = handle->ifmblock;
       descriptor.kh = handle->desc.R;
@@ -593,7 +593,7 @@ LIBXSMM_API_DEFINITION libxsmm_dnn_err_t libxsmm_dnn_internal_create_conv_handle
         int upper_limit_ofw_rb = wu_max_code_size / wu_each_iter_code_size, upper_limit_ofh_rb = 0;
         descriptor.ifm_unroll = 1;
 
-        for(i = LIBXSMM_MIN(upper_limit_ofw_rb, LIBXSMM_MIN(28,handle->ofw)); i >= 1; i--) {
+        for(i = LIBXSMM_MIN(upper_limit_ofw_rb, LIBXSMM_MIN(56,handle->ofw)); i >= 1; i--) {
           if(handle->ofw % i == 0) break;
         }
         descriptor.ofw_rb =  i;
@@ -695,29 +695,22 @@ LIBXSMM_API_DEFINITION libxsmm_dnn_err_t libxsmm_dnn_internal_create_conv_handle
 
 /*#ifdef LIBXSMM_WU_TRANSPOSE_OFW_IFM*/
       handle->scratch3 = libxsmm_aligned_malloc( /* allocate raw data */
-        handle->desc.N * handle->blocksifm * handle->ifmblock * handle->desc.H * handle->desc.W * handle->fm_lp_block * libxsmm_dnn_typesize(handle->datatype_in),
+        handle->desc.N * handle->blocksifm * handle->ifmblock * handle->ifhp * handle->ifwp * handle->fm_lp_block * libxsmm_dnn_typesize(handle->datatype_in),
         LIBXSMM_ALIGNMENT);
 /*#endif*/
-      if (handle->ifmblock == 1) {
+      if ((handle->ifmblock == 1) || ((handle->blocksifm * handle->blocksofm) < (2*handle->desc.threads))) {
         handle->upd_use_thread_fil = 1;
         handle->scratch4 = libxsmm_aligned_malloc(
           handle->desc.threads * handle->blocksifm * handle->ifmblock * handle->blocksofm * handle->ofmblock
           * handle->desc.R * handle->desc.S * handle->fm_lp_block * libxsmm_dnn_typesize(handle->datatype_in),
           LIBXSMM_ALIGNMENT);
+        /* enable external reduce of filter scratch */
+        if ( (handle->options & LIBXSMM_DNN_CONV_OPTION_WU_EXT_FILTER_REDUCE) > 0 ) {
+          handle->upd_use_external_reduce = 1;
+        }
       } else {
         handle->scratch4 = 0;
         handle->upd_use_thread_fil = 0;
-      }
-      if ( ((libxsmm_get_target_archid() == LIBXSMM_X86_AVX2) ||
-             ((handle->filter_format != LIBXSMM_DNN_CONV_FORMAT_LIBXSMM) || (handle->buffer_format != LIBXSMM_DNN_CONV_FORMAT_LIBXSMM)) )
-             && (handle->upd_use_thread_fil == 0)) {
-        if ( (handle->desc.threads*2) > (handle->blocksifm*handle->blocksofm) ) {
-          handle->upd_use_thread_fil = 1;
-          handle->scratch4 = libxsmm_aligned_malloc(
-            handle->desc.threads * handle->blocksifm * handle->ifmblock * handle->blocksofm * handle->ofmblock
-            * handle->desc.R * handle->desc.S * handle->fm_lp_block * libxsmm_dnn_typesize(handle->datatype_in),
-            LIBXSMM_ALIGNMENT);
-        }
       }
     }
   }
@@ -743,6 +736,7 @@ LIBXSMM_API_DEFINITION libxsmm_dnn_err_t libxsmm_dnn_internal_create_conv_handle
 /*#ifdef LIBXSMM_WU_TRANSPOSE_OFW_IFM*/
     handle->scratch3 = 0;
 /*#endif*/
+    handle->scratch4 = 0;
   }
 
   return status;

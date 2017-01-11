@@ -1,5 +1,5 @@
 /******************************************************************************
-** Copyright (c) 2015-2016, Intel Corporation                                **
+** Copyright (c) 2015-2017, Intel Corporation                                **
 ** All rights reserved.                                                      **
 **                                                                           **
 ** Redistribution and use in source and binary forms, with or without        **
@@ -62,7 +62,7 @@ LIBXSMM_HASH_API unsigned int libxsmm_crc32_sw(
   const void* data, unsigned int size, unsigned int seed);
 
 /** Similar to libxsmm_crc32_sw (uses CRC32 instructions available since SSE4.2). */
-LIBXSMM_HASH_API unsigned int libxsmm_crc32_sse42(
+LIBXSMM_HASH_API unsigned int libxsmm_crc32_sse4(
   const void* data, unsigned int size, unsigned int seed);
 
 /** Calculate a hash value for a given quantity (size) of raw data according to the seed. */

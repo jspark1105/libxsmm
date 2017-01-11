@@ -1,5 +1,5 @@
 #############################################################################
-# Copyright (c) 2015-2016, Intel Corporation                                #
+# Copyright (c) 2015-2017, Intel Corporation                                #
 # All rights reserved.                                                      #
 #                                                                           #
 # Redistribution and use in source and binary forms, with or without        #
@@ -143,8 +143,8 @@ IPO ?= 0
 ILP64 ?= 0
 BLAS ?= 0
 
-# Prefer to link statically against BLAS library
-BLAS_STATIC ?= $(STATIC)
+# Separate control on how to link against the BLAS library
+BLAS_STATIC ?= $(DEPSTATIC)
 ifneq (0,$(BLAS_STATIC))
   BLASLIBEXT ?= $(SLIBEXT)
 else
@@ -404,8 +404,10 @@ endif
 
 # Too many ICEs with Clang hence we want to know if we are on Clang
 ifeq (0,$(GCC)) # not GCC
-ifeq (0,$(shell $(CC) -dM -E - < /dev/null | grep -q "__clang__"; echo "$$?"))
+ifeq (0,$(INTEL)) # not Intel
+ifeq (0,$(shell $(CC) -dM -E - < /dev/null 2> /dev/null | grep -q "__clang__"; echo "$$?"))
   CLANG = 1
+endif
 endif
 endif
 CLANG ?= 0
@@ -817,7 +819,7 @@ ifeq (,$(CTARGET))
 ifneq (0,$(shell echo "$$((3 > $(DBG)))"))
   ifneq (0,$(shell echo "$$((2 <= $(AVX)))"))
     ifeq (3,$(AVX))
-    ifneq (0,$(shell echo "$$((0 == $(CLANG) || 30500 <= $(CC_VERSION)))"))
+    ifneq (0,$(shell echo "$$((0 == $(CLANG) || 30500 <= $(CC_VERSION) || 0 == $(CC_VERSION)))"))
     ifeq (0,$(shell $(CC) -E -mavx512f -mavx512cd /dev/null 2> /dev/null > /dev/null; echo $$?))
       CTARGET = -mavx512f -mavx512cd
       # fix for Clang
@@ -1102,7 +1104,7 @@ else ifneq (0,$(BLAS)) # generic
       endif
       QUADMATH = $(shell $(LD) $(SLDFLAGS) -lquadmath 2>&1 | grep -q "\-lquadmath"; echo "$$?")
       ifneq (0,$(QUADMATH))
-        BLAS_CLDFLAGS += $(XLIB_BEGIN) -lquadmath $(XLIB_END)
+        BLAS_CLDFLAGS += $(XLIB_BEGIN) -lquadmath -lm $(XLIB_END)
       endif
     endif
   else # BLAS library is specified via BLASLIB

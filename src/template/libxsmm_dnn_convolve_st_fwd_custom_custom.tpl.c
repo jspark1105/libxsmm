@@ -1,5 +1,5 @@
 /******************************************************************************
-** Copyright (c) 2016, Intel Corporation                                     **
+** Copyright (c) 2016-2017, Intel Corporation                                **
 ** All rights reserved.                                                      **
 **                                                                           **
 ** Redistribution and use in source and binary forms, with or without        **
@@ -123,7 +123,7 @@ if ( libxsmm_get_target_archid() == LIBXSMM_X86_AVX512_MIC ||
               }
               else {
                 jitted_conv_fp_two(l_input, l_wt, l_output,
-                  &LIBXSMM_VLA_ACCESS(6, input, ifm1 + 1, 0, 0, 0, 0, 0,
+                  &LIBXSMM_VLA_ACCESS(6, input, img, ifm1 + 1, 0, 0, 0, 0,
                     handle->blocksifm, handle->ifhp, handle->ifwp, handle->ifmblock, handle->fm_lp_block),
                   &LIBXSMM_VLA_ACCESS(7, weight, ofm1, ifm1 + 1, 0, 0, 0, 0, 0,
                     handle->blocksifm, handle->desc.R, handle->desc.S, handle->ifmblock, handle->ofmblock, handle->fm_lp_block),

@@ -1,5 +1,5 @@
 /******************************************************************************
-** Copyright (c) 2015-2016, Intel Corporation                                **
+** Copyright (c) 2015-2017, Intel Corporation                                **
 ** All rights reserved.                                                      **
 **                                                                           **
 ** Redistribution and use in source and binary forms, with or without        **
@@ -223,6 +223,11 @@ int main(int argc, char* argv[])
 #endif
       // initialize LIBXSMM
       libxsmm_init();
+#if !defined(LIBXSMM_OFFLOAD_TARGET)
+      // some more setup similar to CP2K/intel branch
+      libxsmm_set_gemm_auto_prefetch(LIBXSMM_X86_AVX512_MIC != libxsmm_get_target_archid() ? LIBXSMM_PREFETCH_AL2BL2_VIA_C : LIBXSMM_PREFETCH_BL2_VIA_C);
+#endif
+      //libxsmm_set_dispatch_trylock(1);
 
       fprintf(stdout, "m=%i n=%i k=%i size=%i memory=%.1f MB (%s)\n\n", m, n, k, s,
         1.0 * (s * (asize + bsize) * sizeof(T)) / (1 << 20), 8 == sizeof(T) ? "DP" : "SP");

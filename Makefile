@@ -184,6 +184,11 @@ ifneq (1,$(CACHE))
   DFLAGS += -DLIBXSMM_CACHESIZE=$(CACHE)
 endif
 
+# disable lazy initialization and rely on ctor attribute
+ifeq (0,$(INIT))
+  DFLAGS += -DLIBXSMM_CTOR
+endif
+
 # state to be excluded from tracking the (re-)build state
 EXCLUDE_STATE = BLAS_WARNING PREFIX
 
@@ -271,7 +276,11 @@ ifneq (,$(strip $(FC)))
 endif
 
 .PHONY: libxsmm
+ifeq (0,$(COMPATIBLE))
 libxsmm: lib generator
+else
+libxsmm: lib
+endif
 
 .PHONY: lib
 lib: headers drytest lib_hst lib_mic
@@ -601,7 +610,9 @@ endef
 EXTCFLAGS = -DLIBXSMM_BUILD_EXT
 ifneq (0,$(STATIC))
 ifneq (0,$(WRAP))
+ifneq (,$(strip $(WRAP)))
   EXTCFLAGS += -DLIBXSMM_GEMM_WRAP=$(WRAP)
+endif
 endif
 endif
 
@@ -863,6 +874,9 @@ endif
 
 .PHONY: samples
 samples: cp2k nek smm wrap
+	@find $(SPLDIR) -type f -name Makefile | grep -v /specfem/ | grep -v /pyfr/ \
+		$(patsubst %, | grep -v /%/,$^) | xargs -I {} dirname {} | xargs -I {} $(SHELL) -c \
+		"cd {}; $(MAKE) --no-print-directory"
 
 .PHONY: cp2k
 cp2k: lib_hst
@@ -1251,8 +1265,9 @@ $(DOCDIR)/libxsmm.pdf: $(DOCDIR)/.make $(ROOTDIR)/README.md
 	@pandoc -D latex \
 	| sed \
 		-e 's/\(\\documentclass\[..*\]{..*}\)/\1\n\\pagenumbering{gobble}\n\\RedeclareSectionCommands[beforeskip=-1pt,afterskip=1pt]{subsection,subsubsection}/' \
-		-e 's/\\usepackage{listings}/\\usepackage{listings}\\lstset{basicstyle=\\footnotesize\\ttfamily}/' > \
-		$(TMPFILE).tex
+		-e 's/\\usepackage{listings}/\\usepackage{listings}\\lstset{basicstyle=\\footnotesize\\ttfamily}/' \
+		-e 's/\(\\usepackage.*{hyperref}\)/\\usepackage[hyphens]{url}\n\1/' \
+		> $(TMPFILE).tex
 	@iconv -t utf-8 $(ROOTDIR)/README.md \
 	| sed \
 		-e 's/\[\[..*\](..*)\]//g' \
@@ -1279,8 +1294,9 @@ $(DOCDIR)/cp2k.pdf: $(DOCDIR)/.make $(ROOTDIR)/documentation/cp2k.md
 	@pandoc -D latex \
 	| sed \
 		-e 's/\(\\documentclass\[..*\]{..*}\)/\1\n\\pagenumbering{gobble}\n\\RedeclareSectionCommands[beforeskip=-1pt,afterskip=1pt]{subsection,subsubsection}/' \
-		-e 's/\\usepackage{listings}/\\usepackage{listings}\\lstset{basicstyle=\\footnotesize\\ttfamily}/' > \
-		$(TMPFILE).tex
+		-e 's/\\usepackage{listings}/\\usepackage{listings}\\lstset{basicstyle=\\footnotesize\\ttfamily}/' \
+		-e 's/\(\\usepackage.*{hyperref}\)/\\usepackage[hyphens]{url}\n\1/' \
+		> $(TMPFILE).tex
 	@iconv -t utf-8 $(ROOTDIR)/documentation/cp2k.md \
 	| sed \
 		-e 's/\[\[..*\](..*)\]//g' \
@@ -1304,51 +1320,43 @@ $(DOCDIR)/cp2k.pdf: $(DOCDIR)/.make $(ROOTDIR)/documentation/cp2k.md
 .PHONY: documentation
 documentation: $(DOCDIR)/libxsmm.pdf $(DOCDIR)/cp2k.pdf
 
-.PHONY: clean-minimal
-clean-minimal:
-	@rm -rf $(SCRDIR)/__pycache__
-	@rm -f $(SCRDIR)/libxsmm_utilities.pyc
-	@touch $(INCDIR)/.make 2> /dev/null || true
-	@touch $(SPLDIR)/cp2k/.make
-	@touch $(SPLDIR)/smm/.make
-	@touch $(SPLDIR)/nek/.make
-
 .PHONY: clean
-clean: clean-minimal
-	@rm -f $(OBJECTS) $(FTNOBJS) $(SRCFILES_KERNELS)
-	@rm -f $(BLDDIR)/libxsmm_dispatch.h
-	@if [ "" = "$$(find build -type f -not -name .make 2> /dev/null)" ]; then \
-		rm -rf $(BLDDIR); \
-	fi
-
-.PHONY: realclean
-realclean: clean
+clean:
 ifneq ($(abspath $(BLDDIR)),$(ROOTDIR))
 ifneq ($(abspath $(BLDDIR)),$(abspath .))
 	@rm -rf $(BLDDIR)
 endif
 endif
+ifneq (,$(wildcard $(BLDDIR))) # still exists
+	@rm -f $(OBJECTS) $(FTNOBJS) $(SRCFILES_KERNELS) $(BLDDIR)/libxsmm_dispatch.h
+	@rm -f $(BLDDIR)/*.gcno $(BLDDIR)/*.gcda $(BLDDIR)/*.gcov
+endif
+	@find . -type f \( -name .make -or -name .state \) -exec rm {} \;
+	@rm -f $(SCRDIR)/libxsmm_utilities.pyc
+	@rm -rf $(SCRDIR)/__pycache__
+
+.PHONY: realclean
+realclean: clean
 ifneq ($(abspath $(OUTDIR)),$(ROOTDIR))
 ifneq ($(abspath $(OUTDIR)),$(abspath .))
 	@rm -rf $(OUTDIR)
 endif
 endif
-ifneq ($(abspath $(BINDIR)),$(ROOTDIR))
-ifneq ($(abspath $(BINDIR)),$(abspath .))
-	@rm -rf $(BINDIR)
-endif
-endif
-ifneq (,$(wildcard $(OUTDIR)))
+ifneq (,$(wildcard $(OUTDIR))) # still exists
 	@rm -f $(OUTDIR)/libxsmm.$(LIBEXT)* $(OUTDIR)/mic/libxsmm.$(LIBEXT)*
 	@rm -f $(OUTDIR)/libxsmmf.$(LIBEXT)* $(OUTDIR)/mic/libxsmmf.$(LIBEXT)*
 	@rm -f $(OUTDIR)/libxsmmext.$(LIBEXT)* $(OUTDIR)/mic/libxsmmext.$(LIBEXT)*
 	@rm -f $(OUTDIR)/libxsmmnoblas.$(LIBEXT)* $(OUTDIR)/mic/libxsmmnoblas.$(LIBEXT)*
 	@rm -f $(OUTDIR)/libxsmmgen.$(LIBEXT)*
 endif
-ifneq (,$(wildcard $(BINDIR)))
+ifneq ($(abspath $(BINDIR)),$(ROOTDIR))
+ifneq ($(abspath $(BINDIR)),$(abspath .))
+	@rm -rf $(BINDIR)
+endif
+endif
+ifneq (,$(wildcard $(BINDIR))) # still exists
 	@rm -f $(BINDIR)/libxsmm_*_generator
 endif
-	@rm -f *.gcno *.gcda *.gcov
 	@rm -f $(SPLDIR)/cp2k/cp2k-perf.sh
 	@rm -f $(SPLDIR)/smm/smmf-perf.sh
 	@rm -f $(SPLDIR)/nek/grad-perf.sh
@@ -1360,32 +1368,16 @@ endif
 	@rm -f $(INCDIR)/libxsmm.mod
 	@rm -f $(INCDIR)/libxsmm.f
 	@rm -f $(INCDIR)/libxsmm.h
-	@rm -f $(INCDIR)/.make
-	@rm -f $(DOCDIR)/.make
-	@rm -f .make .state
 
 .PHONY: clean-all
 clean-all: clean
-	@cd $(TSTDIR)           && $(MAKE) --no-print-directory clean-minimal
-	@cd $(SPLDIR)/cp2k      && $(MAKE) --no-print-directory clean-minimal
-	@cd $(SPLDIR)/dispatch  && $(MAKE) --no-print-directory clean-minimal
-	@cd $(SPLDIR)/nek       && $(MAKE) --no-print-directory clean-minimal
-	@cd $(SPLDIR)/smm       && $(MAKE) --no-print-directory clean-minimal
-	@cd $(SPLDIR)/wrap      && $(MAKE) --no-print-directory clean-minimal
+	@find $(ROOTDIR) -type f -name Makefile -exec dirname {} \; | xargs -I {} $(SHELL) -c \
+		"cd {}; $(MAKE) --no-print-directory clean 2> /dev/null || true"
 
 .PHONY: realclean-all
 realclean-all: realclean
-	@cd $(TSTDIR)           && $(MAKE) --no-print-directory realclean
-	@cd $(SPLDIR)/barrier   && $(MAKE) --no-print-directory realclean
-	@cd $(SPLDIR)/cp2k      && $(MAKE) --no-print-directory realclean
-	@cd $(SPLDIR)/dispatch  && $(MAKE) --no-print-directory realclean
-	@cd $(SPLDIR)/dnn       && $(MAKE) --no-print-directory realclean
-	@cd $(SPLDIR)/nek       && $(MAKE) --no-print-directory realclean
-	@cd $(SPLDIR)/smm       && $(MAKE) --no-print-directory realclean
-	@cd $(SPLDIR)/specfem   && $(MAKE) --no-print-directory realclean
-	@cd $(SPLDIR)/transpose && $(MAKE) --no-print-directory realclean
-	@cd $(SPLDIR)/wrap      && $(MAKE) --no-print-directory realclean
-	@cd $(SPLDIR)/xgemm     && $(MAKE) --no-print-directory realclean
+	@find $(ROOTDIR) -type f -name Makefile -exec dirname {} \; | xargs -I {} $(SHELL) -c \
+		"cd {}; $(MAKE) --no-print-directory realclean 2> /dev/null || true"
 
 # Dummy prefix
 ifneq (,$(strip $(PREFIX)))
