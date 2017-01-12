@@ -547,7 +547,9 @@ LIBXSMM_INLINE LIBXSMM_RETARGETABLE unsigned int internal_statistic_ntry(int pre
 }
 
 
-LIBXSMM_INLINE LIBXSMM_RETARGETABLE void internal_register_static_code(const libxsmm_gemm_descriptor* desc,
+LIBXSMM_API void internal_register_static_code(const libxsmm_gemm_descriptor*,
+  unsigned int, unsigned int, libxsmm_xmmfunction, libxsmm_code_pointer*);
+LIBXSMM_API_DEFINITION void internal_register_static_code(const libxsmm_gemm_descriptor* desc,
   unsigned int index, unsigned int hash, libxsmm_xmmfunction src, libxsmm_code_pointer* registry)
 {
   internal_regkey_type* dst_key = internal_registry_keys + index;
@@ -792,7 +794,7 @@ LIBXSMM_INLINE LIBXSMM_RETARGETABLE libxsmm_code_pointer* internal_init(void)
 }
 
 
-LIBXSMM_API_DEFINITION LIBXSMM_CTOR_ATTRIBUTE void libxsmm_init(void)
+LIBXSMM_API_DEFINITION LIBXSMM_ATTRIBUTE_CTOR void libxsmm_init(void)
 {
   const void *const registry = LIBXSMM_ATOMIC_LOAD(&internal_registry, LIBXSMM_ATOMIC_RELAXED);
   if (0 == registry) {
@@ -807,7 +809,7 @@ LIBXSMM_ATTRIBUTE(no_instrument_function)
 #endif
 void libxsmm_finalize(void);
 
-LIBXSMM_API_DEFINITION LIBXSMM_DTOR_ATTRIBUTE void libxsmm_finalize(void)
+LIBXSMM_API_DEFINITION LIBXSMM_ATTRIBUTE_DTOR void libxsmm_finalize(void)
 {
   libxsmm_code_pointer* registry = LIBXSMM_ATOMIC_LOAD(&internal_registry, LIBXSMM_ATOMIC_SEQ_CST);
 
@@ -1075,7 +1077,8 @@ LIBXSMM_API_DEFINITION void libxsmm_set_gemm_auto_prefetch(libxsmm_gemm_prefetch
 }
 
 
-LIBXSMM_INLINE LIBXSMM_RETARGETABLE const char* internal_get_precision_string(libxsmm_dnn_datatype datatype)
+LIBXSMM_API const char* internal_get_precision_string(libxsmm_dnn_datatype);
+LIBXSMM_API_DEFINITION const char* internal_get_precision_string(libxsmm_dnn_datatype datatype)
 {
   const char* result = "unk"; /* unknown */
   switch (datatype) {

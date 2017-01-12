@@ -341,12 +341,6 @@
 # endif
 #endif
 
-#if defined(__GNUC__) || (defined(__INTEL_COMPILER) && !defined(_WIN32))
-# define LIBXSMM_UNUSED_ARG LIBXSMM_ATTRIBUTE(unused)
-#else
-# define LIBXSMM_UNUSED_ARG
-#endif
-
 #if defined(__GNUC__) && defined(LIBXSMM_BUILD)
 # define LIBXSMM_VISIBILITY_HIDDEN LIBXSMM_ATTRIBUTE(visibility("hidden"))
 # define LIBXSMM_VISIBILITY_INTERNAL LIBXSMM_ATTRIBUTE(visibility("internal"))
@@ -364,13 +358,18 @@
 #endif
 
 #if defined(__GNUC__)
-# define LIBXSMM_CTOR_ATTRIBUTE LIBXSMM_ATTRIBUTE(constructor)
-# define LIBXSMM_DTOR_ATTRIBUTE LIBXSMM_ATTRIBUTE(destructor)
+# define LIBXSMM_ATTRIBUTE_CTOR LIBXSMM_ATTRIBUTE(constructor)
+# define LIBXSMM_ATTRIBUTE_DTOR LIBXSMM_ATTRIBUTE(destructor)
 #else
-# define LIBXSMM_CTOR_ATTRIBUTE
-# define LIBXSMM_DTOR_ATTRIBUTE
+# define LIBXSMM_ATTRIBUTE_CTOR
+# define LIBXSMM_ATTRIBUTE_DTOR
 #endif
 
+#if defined(__GNUC__) || (defined(__INTEL_COMPILER) && !defined(_WIN32))
+# define LIBXSMM_ATTRIBUTE_UNUSED LIBXSMM_ATTRIBUTE(unused)
+#else
+# define LIBXSMM_ATTRIBUTE_UNUSED
+#endif
 #if defined(__GNUC__)
 # define LIBXSMM_MAY_ALIAS LIBXSMM_ATTRIBUTE(__may_alias__)
 #else
