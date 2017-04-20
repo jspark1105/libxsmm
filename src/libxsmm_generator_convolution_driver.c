@@ -33,7 +33,6 @@
 #include <string.h>
 #include <stdio.h>
 
-
 LIBXSMM_INLINE void print_help(void) {
   printf("\nUsage:\n");
   printf("    inlineasm/plainasm\n");
@@ -54,7 +53,7 @@ LIBXSMM_INLINE void print_help(void) {
   printf("    stride_h\n");
   printf("    stride_w\n");
   printf("    precision (0=FP32,1=INT16)\n");
-  printf("    ARCH: knl, skx\n");
+  printf("    ARCH: knl, knm, skx\n");
   printf("\n\n");
 }
 
@@ -114,14 +113,15 @@ int main(int argc, char* argv []) {
   /* some intial parameters checks */
   /* check for sparse / dense only */
   if ( (strcmp(l_type, "inlineasm") != 0) &&
-       (strcmp(l_type, "plainasm")  != 0)    ) {
+       (strcmp(l_type, "plainasm")  != 0) ) {
     print_help();
     return -1;
   }
 
   /* check value of arch flag */
   if ( (strcmp(l_arch, "knl") != 0)    &&
-       (strcmp(l_arch, "skx") != 0)       ) {
+       (strcmp(l_arch, "knm") != 0)    &&
+       (strcmp(l_arch, "skx") != 0) ) {
     print_help();
     return -1;
   }
@@ -144,20 +144,20 @@ int main(int argc, char* argv []) {
   switch (l_prec)
   {
     case 0:
-      l_conv_desc.datatype_in = LIBXSMM_DNN_DATATYPE_F32;
-      l_conv_desc.datatype_out = LIBXSMM_DNN_DATATYPE_F32;
+      l_conv_desc.datatype = LIBXSMM_DNN_DATATYPE_F32;
+      l_conv_desc.datatype_itm = LIBXSMM_DNN_DATATYPE_F32;
       break;
     case 1:
-      l_conv_desc.datatype_in = LIBXSMM_DNN_DATATYPE_I16;
-      l_conv_desc.datatype_out = LIBXSMM_DNN_DATATYPE_I32;
+      l_conv_desc.datatype = LIBXSMM_DNN_DATATYPE_I16;
+      l_conv_desc.datatype_itm = LIBXSMM_DNN_DATATYPE_I32;
       break;
     default:
-      l_conv_desc.datatype_in = LIBXSMM_DNN_DATATYPE_F32;
-      l_conv_desc.datatype_out = LIBXSMM_DNN_DATATYPE_F32;
+      l_conv_desc.datatype = LIBXSMM_DNN_DATATYPE_F32;
+      l_conv_desc.datatype_itm = LIBXSMM_DNN_DATATYPE_F32;
       break;
   }
   l_conv_desc.prefetch = LIBXSMM_CONVOLUTION_PREFETCH_NONE;
-  l_conv_desc.format = LIBXSMM_DNN_CONV_FORMAT_LIBXSMM;
+  l_conv_desc.format = LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM;
 
   /* generate code */
   if ( strcmp(l_type, "inlineasm")  == 0 ) {

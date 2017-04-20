@@ -28,11 +28,6 @@
 ******************************************************************************/
 /* Alexander Heinecke (Intel Corp.)
 ******************************************************************************/
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include <libxsmm_generator.h>
 #include <libxsmm_macros.h>
 #include "generator_common.h"
@@ -41,11 +36,17 @@
 #include "generator_gemm_imci_avx512.h"
 #include "generator_gemm_noarch.h"
 
+#include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+#include <stdio.h>
+
 /* @TODO change int based architecture value */
+LIBXSMM_INTERNAL_API_DEFINITION
 void libxsmm_generator_gemm_kernel( libxsmm_generated_code*         io_generated_code,
                                     const libxsmm_gemm_descriptor* i_xgemm_desc,
                                     const char*                     i_arch ) {
-  /* apply the alignement override */
+  /* apply the alignment override */
   libxsmm_gemm_descriptor l_xgemm_desc_mod = *i_xgemm_desc;
   unsigned int l_vector_length = 1;
 
@@ -73,6 +74,10 @@ void libxsmm_generator_gemm_kernel( libxsmm_generated_code*         io_generated
   } else if ( (strcmp(i_arch, "knl") == 0) && (LIBXSMM_GEMM_FLAG_F32PREC & l_xgemm_desc_mod.flags) == 0 ) {
     l_vector_length = 8;
   } else if ( (strcmp(i_arch, "knl") == 0) && (LIBXSMM_GEMM_FLAG_F32PREC & l_xgemm_desc_mod.flags) != 0 ) {
+    l_vector_length = 16;
+  } else if ( (strcmp(i_arch, "knm") == 0) && (LIBXSMM_GEMM_FLAG_F32PREC & l_xgemm_desc_mod.flags) == 0 ) {
+    l_vector_length = 8;
+  } else if ( (strcmp(i_arch, "knm") == 0) && (LIBXSMM_GEMM_FLAG_F32PREC & l_xgemm_desc_mod.flags) != 0 ) {
     l_vector_length = 16;
   } else if ( (strcmp(i_arch, "skx") == 0) && (LIBXSMM_GEMM_FLAG_F32PREC & l_xgemm_desc_mod.flags) == 0 ) {
     l_vector_length = 8;
@@ -113,17 +118,18 @@ void libxsmm_generator_gemm_kernel( libxsmm_generated_code*         io_generated
 
   if ( (strcmp(i_arch, "wsm") == 0) ||
        (strcmp(i_arch, "snb") == 0) ||
-       (strcmp(i_arch, "hsw") == 0)    ) {
+       (strcmp(i_arch, "hsw") == 0) ) {
     /* call actual kernel generation with revised parameters */
     libxsmm_generator_gemm_sse3_avx_avx2_avx512_kernel(io_generated_code, &l_xgemm_desc_mod, i_arch );
   } else if ( (strcmp(i_arch, "knc") == 0) ||
-              (strcmp(i_arch, "knl") == 0)    ) {
+              (strcmp(i_arch, "knl") == 0) ||
+              (strcmp(i_arch, "knm") == 0) ) {
     /* call actual kernel generation with revised parameters */
     libxsmm_generator_gemm_imci_avx512_kernel(io_generated_code, &l_xgemm_desc_mod, i_arch );
   } else if ( (strcmp(i_arch, "skx") == 0) ) {
     /* call actual kernel generation with revised parameters */
     if ( (l_vector_length == 16  && (l_xgemm_desc_mod.m == 32 || l_xgemm_desc_mod.m == 48 || l_xgemm_desc_mod.m == 64)) ||
-         (l_vector_length == 8   && (l_xgemm_desc_mod.m == 16 || l_xgemm_desc_mod.m == 24 || l_xgemm_desc_mod.m == 32))    ) {
+         (l_vector_length == 8   && (l_xgemm_desc_mod.m == 16 || l_xgemm_desc_mod.m == 24 || l_xgemm_desc_mod.m == 32)) ) {
       libxsmm_generator_gemm_sse3_avx_avx2_avx512_kernel(io_generated_code, &l_xgemm_desc_mod, i_arch );
     } else {
       libxsmm_generator_gemm_imci_avx512_kernel(io_generated_code, &l_xgemm_desc_mod, i_arch );
@@ -143,6 +149,8 @@ void libxsmm_generator_gemm_kernel( libxsmm_generated_code*         io_generated
   libxsmm_generator_gemm_add_flop_counter( io_generated_code, i_xgemm_desc );
 }
 
+
+LIBXSMM_INTERNAL_API_DEFINITION
 void libxsmm_generator_gemm_inlineasm(const char*                     i_file_out,
                                        const char*                     i_routine_name,
                                        const libxsmm_gemm_descriptor* i_xgemm_desc,
@@ -183,6 +191,7 @@ void libxsmm_generator_gemm_inlineasm(const char*                     i_file_out
   {
     FILE *const l_file_handle = fopen( i_file_out, "a" );
     if ( l_file_handle != NULL ) {
+      assert(l_generated_code.generated_code != NULL);
       fputs( (const char*)l_generated_code.generated_code, l_file_handle );
       fclose( l_file_handle );
     } else {
@@ -195,6 +204,8 @@ void libxsmm_generator_gemm_inlineasm(const char*                     i_file_out
   free( l_generated_code.generated_code );
 }
 
+
+LIBXSMM_INTERNAL_API_DEFINITION
 void libxsmm_generator_gemm_directasm(const char*                     i_file_out,
                                        const char*                     i_routine_name,
                                        const libxsmm_gemm_descriptor* i_xgemm_desc,
@@ -230,6 +241,7 @@ void libxsmm_generator_gemm_directasm(const char*                     i_file_out
   {
     FILE *const l_file_handle = fopen( i_file_out, "w" );
     if ( l_file_handle != NULL ) {
+      assert(l_generated_code.generated_code != NULL);
       fputs( (const char*)l_generated_code.generated_code, l_file_handle );
       fclose( l_file_handle );
     } else {

@@ -101,7 +101,7 @@ void libxsmm_generator_convolution_forward_avx2_kernel( libxsmm_generated_code* 
   l_conv_kernel_config.alu_mov_instruction = LIBXSMM_X86_INSTR_MOVQ;
   l_conv_kernel_config.vector_name = 'y';
   /* calculate leading dimension depending on format */
-  if ( (i_conv_desc->format & LIBXSMM_DNN_CONV_FORMAT_LIBXSMM) > 0 ) {
+  if ( (i_conv_desc->format & LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM) > 0 ) {
     l_conv_kernel_config.l_ld_ifm_act = i_conv_desc->ifm_block;
     l_conv_kernel_config.l_ld_ofm_act = i_conv_desc->ofm_block;
     l_conv_kernel_config.l_ld_ifm_fil = i_conv_desc->ifm_block;
@@ -109,12 +109,12 @@ void libxsmm_generator_convolution_forward_avx2_kernel( libxsmm_generated_code* 
     l_found_act_format = 1;
     l_found_fil_format = 1;
   }
-  if ( (i_conv_desc->format & LIBXSMM_DNN_CONV_FORMAT_NHWC) > 0 ) {
+  if ( (i_conv_desc->format & LIBXSMM_DNN_TENSOR_FORMAT_NHWC) > 0 ) {
     l_conv_kernel_config.l_ld_ifm_act = i_conv_desc->ifm_block * i_conv_desc->blocks_ifm;
     l_conv_kernel_config.l_ld_ofm_act = i_conv_desc->ofm_block * i_conv_desc->blocks_ofm;
     l_found_act_format = 1;
   }
-  if ( (i_conv_desc->format & LIBXSMM_DNN_CONV_FORMAT_RSCK) > 0 ) {
+  if ( (i_conv_desc->format & LIBXSMM_DNN_TENSOR_FORMAT_RSCK) > 0 ) {
     l_conv_kernel_config.l_ld_ifm_fil = i_conv_desc->ifm_block * i_conv_desc->blocks_ifm;
     l_conv_kernel_config.l_ld_ofm_fil = i_conv_desc->ofm_block * i_conv_desc->blocks_ofm;
     l_found_fil_format = 1;
@@ -124,7 +124,7 @@ void libxsmm_generator_convolution_forward_avx2_kernel( libxsmm_generated_code* 
     return;
   }
 
-  /* initilize KW and KH unrolling */
+  /* initialize KW and KH unrolling */
   if (i_conv_desc->unroll_kw != 0) {
     libxsmm_handle_error( io_generated_code, LIBXSMM_ERR_INVALID_KW_UNROLL );
     return;
@@ -189,7 +189,7 @@ void libxsmm_generator_convolution_forward_avx2_kernel( libxsmm_generated_code* 
                                           l_conv_kernel_config.l_ld_ifm_fil * l_conv_kernel_config.l_ld_ofm_fil * l_conv_kernel_config.datatype_size_wt );
       }
 
-      /* adjust innput pointer */
+      /* adjust input pointer */
       libxsmm_x86_instruction_alu_imm( io_generated_code,
                                        l_conv_kernel_config.alu_add_instruction,
                                        l_gp_reg_mapping.gp_reg_input,

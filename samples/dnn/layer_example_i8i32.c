@@ -77,13 +77,6 @@ typedef struct {
   double one_norm_test;
 } correctness_t;
 
-LIBXSMM_INLINE void zero_buf_int32(int* buf, long size) {
-  int i;
-  for (i = 0; i < size; ++i) {
-    buf[i] = 0;
-  }
-}
-
 LIBXSMM_INLINE void zero_buf_int8(char* buf, long size) {
   int i;
   for (i = 0; i < size; ++i) {
@@ -114,6 +107,7 @@ LIBXSMM_INLINE void init_buf_uint8(unsigned char* buf, long size, int initPos, i
   for (i = 0; i < size; ++i) {
     buf[i] = (unsigned char)((initOne != 0) ? 1 : (rand()%3));
   }
+  LIBXSMM_UNUSED(initPos);
 }
 
 LIBXSMM_INLINE void set_zeropad_nchw_uint8(unsigned char* nchw, int N, int C, int H, int W, int pad_h, int pad_w)
@@ -125,7 +119,7 @@ LIBXSMM_INLINE void set_zeropad_nchw_uint8(unsigned char* nchw, int N, int C, in
     for ( c = 0; c < C; c++ ) {
       for ( h = 0; h < H; h++ ) {
         for ( w = 0; w < W; w++ ) {
-          if(h < pad_h || h >= H-pad_h || w < pad_w || w >= W-pad_w)
+          if (h < pad_h || h >= H-pad_h || w < pad_w || w >= W-pad_w)
             LIBXSMM_VLA_ACCESS(4,  input, n, c, h, w, C, H, W) = 0;
         }
       }
@@ -133,7 +127,7 @@ LIBXSMM_INLINE void set_zeropad_nchw_uint8(unsigned char* nchw, int N, int C, in
   }
 }
 
-LIBXSMM_INLINE void compare_buf_int32(int* ref, int* test, long size, correctness_t* norms)
+LIBXSMM_INLINE void compare_buf_uint8(unsigned char* ref, unsigned char* test, long size, correctness_t* norms)
 {
   int i;
   double diff, rel_err;
@@ -167,7 +161,7 @@ LIBXSMM_INLINE void compare_buf_int32(int* ref, int* test, long size, correctnes
   norms->l2_rel_err = sqrt(norms->l2_rel_err);
 }
 
-LIBXSMM_INLINE void naive_conv_int8(naive_conv_t* param, const unsigned char* input, int* output, const char* filter)
+LIBXSMM_INLINE void naive_conv_int8(naive_conv_t* param, const unsigned char* input, unsigned char* output, const char* filter)
 {
   int nImg      = param->nImg;
   int nIfm      = param->nIfm;
@@ -193,9 +187,27 @@ LIBXSMM_INLINE void naive_conv_int8(naive_conv_t* param, const unsigned char* in
   /* loop counters */
   int img, ofm, ifm, oj, oi, ij, ii, kj, ki;
 
-  LIBXSMM_VLA_DECL(4,                 int, output_t, output + (pad_w_out * ofwp + pad_h_out), nOfm, ofhp, ofwp);
-  LIBXSMM_VLA_DECL(4, const unsigned char,  input_t,  input + (pad_w_in * ifwp + pad_h_in), nIfm, ifhp, ifwp);
-  LIBXSMM_VLA_DECL(4, const          char, filter_t, filter, nIfm, kh, kw);
+  int* output_itm = (int*)libxsmm_aligned_malloc(nImg * nOfm * ofhp * ofwp * sizeof(int), 64);
+
+  LIBXSMM_VLA_DECL(4,                 int, output_itm_t, output_itm + (pad_w_out * ofwp + pad_h_out), nOfm, ofhp, ofwp);
+  LIBXSMM_VLA_DECL(4,       unsigned char,     output_t, output + (pad_w_out * ofwp + pad_h_out), nOfm, ofhp, ofwp);
+  LIBXSMM_VLA_DECL(4, const unsigned char,      input_t,  input + (pad_w_in * ifwp + pad_h_in), nIfm, ifhp, ifwp);
+  LIBXSMM_VLA_DECL(4, const          char,     filter_t, filter, nIfm, kh, kw);
+
+  /* up convert */
+#if defined(_OPENMP)
+# pragma omp parallel for LIBXSMM_OPENMP_COLLAPSE(2) private(img, ofm, oj, oi)
+#endif
+  for (img = 0; img < nImg; ++img) {
+    for (ofm = 0; ofm < nOfm; ++ofm) {
+      for (oj = 0; oj < ofh; ++oj) {
+        for (oi = 0; oi < ofw; ++oi) {
+          LIBXSMM_VLA_ACCESS(  4, output_itm_t, img, ofm, oj, oi, nOfm, ofhp, ofwp) =
+           (int)LIBXSMM_VLA_ACCESS(  4, output_t, img, ofm, oj, oi, nOfm, ofhp, ofwp);
+        }
+      }
+    }
+  }
 
 #if defined(_OPENMP)
 # pragma omp parallel for LIBXSMM_OPENMP_COLLAPSE(2) private(img, ofm, ifm, oj, oi, ij, ii, kj, ki)
@@ -208,10 +220,10 @@ LIBXSMM_INLINE void naive_conv_int8(naive_conv_t* param, const unsigned char* in
           for (oi = 0; oi < ofw; ++oi) {
             ii = oi * stride_w - pad_w;
             for (kj = 0; kj < kh; ++kj) {
-              if(ij+kj < 0 || ij+kj >= ifh) continue;
+              if (ij+kj < 0 || ij+kj >= ifh) continue;
               for (ki = 0; ki < kw; ++ki) {
-                if(ii+ki < 0 || ii+ki >= ifw) continue;
-                LIBXSMM_VLA_ACCESS(  4, output_t, img, ofm, oj, oi, nOfm, ofhp, ofwp) += (int)
+                if (ii+ki < 0 || ii+ki >= ifw) continue;
+                LIBXSMM_VLA_ACCESS(  4, output_itm_t, img, ofm, oj, oi, nOfm, ofhp, ofwp) += (int)
                   LIBXSMM_VLA_ACCESS(4,  input_t, img, ifm, ij + kj, ii + ki, nIfm, ifhp, ifwp)
                 * LIBXSMM_VLA_ACCESS(4, filter_t, ofm, ifm, kj, ki, nIfm, kh, kw);
               }
@@ -221,6 +233,23 @@ LIBXSMM_INLINE void naive_conv_int8(naive_conv_t* param, const unsigned char* in
       }
     }
   }
+
+  /* down convert */
+#if defined(_OPENMP)
+# pragma omp parallel for LIBXSMM_OPENMP_COLLAPSE(2) private(img, ofm, oj, oi)
+#endif
+  for (img = 0; img < nImg; ++img) {
+    for (ofm = 0; ofm < nOfm; ++ofm) {
+      for (oj = 0; oj < ofh; ++oj) {
+        for (oi = 0; oi < ofw; ++oi) {
+          LIBXSMM_VLA_ACCESS(  4, output_t, img, ofm, oj, oi, nOfm, ofhp, ofwp) =
+           (unsigned char)LIBXSMM_VLA_ACCESS(  4, output_itm_t, img, ofm, oj, oi, nOfm, ofhp, ofwp);
+        }
+      }
+    }
+  }
+
+  libxsmm_free(output_itm);
 }
 
 int main(int argc, char* argv[])
@@ -229,15 +258,16 @@ int main(int argc, char* argv[])
   char *naive_filter;
   unsigned char *input_nhwc;
   char *filter_rsck;
-  int *naive_output, *naive_libxsmm_output;
-  int *output_nhwc, *naive_output_nhwc;
+  unsigned char *naive_output, *naive_libxsmm_output;
+  unsigned char *output_nhwc, *naive_output_nhwc;
   unsigned char *input_libxsmm;
   char *filter_libxsmm;
-  int *output_libxsmm;
+  unsigned char *output_libxsmm;
   int ifhp, ifwp, ofhp, ofwp, ofh, ofw;
   int stride_h, stride_w, pad_h, pad_w, pad_h_in, pad_w_in, pad_h_out, pad_w_out;
   naive_conv_t naive_param;
   correctness_t norms_fwd;
+  void* scratch;
 
   /* some parameters we can overwrite via cli,
      default is some inner layer of overfeat */
@@ -257,6 +287,7 @@ int main(int argc, char* argv[])
 #else
   int nThreads = 1;       /* number of threads */
 #endif
+  int padding_mode = 0;   /* padding mode */
 
   unsigned long long l_start, l_end;
   double l_total = 0.0;
@@ -264,7 +295,7 @@ int main(int argc, char* argv[])
   int i;
 
   libxsmm_dnn_conv_desc conv_desc;
-  libxsmm_dnn_conv_handle* libxsmm_handle;
+  libxsmm_dnn_layer* libxsmm_handle;
   libxsmm_dnn_buffer* libxsmm_input;
   libxsmm_dnn_buffer* libxsmm_output;
   libxsmm_dnn_filter* libxsmm_filter;
@@ -273,7 +304,7 @@ int main(int argc, char* argv[])
   memset(&norms_fwd, 0, sizeof(norms_fwd));
 
   if (argc > 1 && !strncmp(argv[1], "-h", 3)) {
-    printf("Usage: %s iters inpWidth inpHeight nImg nIfm nOfm kw kh pad stride\n", argv[0]);
+    printf("Usage: %s iters inpWidth inpHeight nImg nIfm nOfm kw kh pad stride type padding_mode\n", argv[0]);
     return 0;
   }
   srand(1);
@@ -291,6 +322,8 @@ int main(int argc, char* argv[])
   if (argc > i) pad        = atoi(argv[i++]);
   if (argc > i) stride     = atoi(argv[i++]);
   if (argc > i) type       = *(argv[i++]);
+  if (argc > i) padding_mode = atoi(argv[i++]);
+
 
   if (type != 'A' && type != 'F' /* && type != 'B' && type != 'U'*/) {
     /*printf("type needs to be 'A' (All), 'F' (FP only), 'B' (BP only), 'U' (WU only)\n");*/
@@ -303,8 +336,13 @@ int main(int argc, char* argv[])
   pad_h = pad;
   pad_w = pad;
 
-  pad_h_in = pad_h;
-  pad_w_in = pad_w;
+  if (padding_mode == 1) {
+    pad_h_in = pad_h;
+    pad_w_in = pad_w;
+  } else {
+    pad_h_in = 0;
+    pad_w_in = 0;
+  }
 
   pad_h_out = 0;
   pad_w_out = 0;
@@ -349,26 +387,35 @@ int main(int argc, char* argv[])
   printf(" InImg %dx%d Padded (%dx%d)\n", ifh, ifw, ifhp, ifwp);
   printf("OutImg %dx%d Padded (%dx%d)\n", ofh, ofw, ofhp, ofwp);
   printf("SIZE Input  (MB): %10.2f MiB\n", (double)(nImg*nIfm*ifhp*ifwp*sizeof(unsigned char))/(1024.0*1024.0) );
-  printf("SIZE Output (MB): %10.2f MiB\n", (double)(nImg*nOfm*ofhp*ofwp*sizeof(int))/(1024.0*1024.0) );
+  printf("SIZE Output (MB): %10.2f MiB\n", (double)(nImg*nOfm*ofhp*ofwp*sizeof(unsigned char))/(1024.0*1024.0) );
   printf("SIZE Input   (1): %10.2f MiB\n", (double)(1*nIfm*ifhp*ifwp*   sizeof(unsigned char))/(1024.0*1024.0) );
-  printf("SIZE Output  (1): %10.2f MiB\n", (double)(1*nOfm*ofhp*ofwp*   sizeof(short))/(1024.0*1024.0) );
-  printf("SIZE Weight     : %10.2f MiB\n", (double)(nIfm*nOfm*kw*kh*    sizeof(int))/(1024.0*1024.0) );
+  printf("SIZE Output  (1): %10.2f MiB\n", (double)(1*nOfm*ofhp*ofwp*   sizeof(unsigned char))/(1024.0*1024.0) );
+  printf("SIZE Weight     : %10.2f MiB\n", (double)(nIfm*nOfm*kw*kh*    sizeof(char))/(1024.0*1024.0) );
 
   /* allocate data */
   naive_input           = (unsigned char*)libxsmm_aligned_malloc( nImg*nIfm*ifhp*ifwp*sizeof(unsigned char), 2097152);
-  naive_output          = (int*)          libxsmm_aligned_malloc( nImg*nOfm*ofhp*ofwp*sizeof(int),           2097152);
-  naive_libxsmm_output  = (int*)          libxsmm_aligned_malloc( nImg*nOfm*ofhp*ofwp*sizeof(int),           2097152);
+  naive_output          = (unsigned char*)libxsmm_aligned_malloc( nImg*nOfm*ofhp*ofwp*sizeof(unsigned char), 2097152);
+  naive_libxsmm_output  = (unsigned char*)libxsmm_aligned_malloc( nImg*nOfm*ofhp*ofwp*sizeof(unsigned char), 2097152);
   naive_filter          = (char*)         libxsmm_aligned_malloc( nOfm*nIfm*kh*kw*    sizeof(char),          2097152);
   input_libxsmm         = (unsigned char*)libxsmm_aligned_malloc( nImg*nIfm*ifhp*ifwp*sizeof(unsigned char), 2097152);
   filter_libxsmm        = (char*)         libxsmm_aligned_malloc( nOfm*nIfm*kh*kw*    sizeof(char),          2097152);
-  output_libxsmm        = (int*)          libxsmm_aligned_malloc( nImg*nOfm*ofhp*ofwp*sizeof(int),           2097152);
+  output_libxsmm        = (unsigned char*)libxsmm_aligned_malloc( nImg*nOfm*ofhp*ofwp*sizeof(unsigned char), 2097152);
 
   /* initialize data */
   init_buf_uint8(naive_input,          nImg*nIfm*ifhp*ifwp, 0, 0);
   set_zeropad_nchw_uint8(naive_input, nImg, nIfm, ifhp, ifwp, pad_h_in, pad_w_in);
-  zero_buf_int32(naive_output,         nImg*nOfm*ofhp*ofwp);
-  zero_buf_int32(naive_libxsmm_output, nImg*nOfm*ofhp*ofwp);
+  zero_buf_uint8(naive_output,         nImg*nOfm*ofhp*ofwp);
+  zero_buf_uint8(naive_libxsmm_output, nImg*nOfm*ofhp*ofwp);
   init_buf_int8 (naive_filter,         nOfm*nIfm*kh*kw, 0, 0);
+
+  printf("##########################################\n");
+  printf("#         Computing Reference ...        #\n");
+  printf("##########################################\n");
+  /* run naive convolution */
+  naive_conv_int8(&naive_param, naive_input, naive_output, naive_filter);
+  printf("##########################################\n");
+  printf("#      Computing Reference ... done      #\n");
+  printf("##########################################\n");
 
   printf("\n");
   printf("##########################################\n");
@@ -385,7 +432,6 @@ int main(int argc, char* argv[])
   conv_desc.S = kw;
   conv_desc.u = stride_h;
   conv_desc.v = stride_w;
-  /* @TODO we need to change the interface to provide CAFFE compatible padding! */
   conv_desc.pad_h = pad_h;
   conv_desc.pad_w = pad_w;
   conv_desc.pad_h_in = pad_h_in;
@@ -394,41 +440,43 @@ int main(int argc, char* argv[])
   conv_desc.pad_w_out = pad_w_out;
   conv_desc.threads = nThreads;
   conv_desc.algo = LIBXSMM_DNN_CONV_ALGO_AUTO;
-  conv_desc.buffer_format = LIBXSMM_DNN_CONV_FORMAT_LIBXSMM;
-  conv_desc.filter_format = LIBXSMM_DNN_CONV_FORMAT_LIBXSMM;
+  conv_desc.buffer_format = LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM;
+  conv_desc.filter_format = LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM;
   conv_desc.fuse_ops = LIBXSMM_DNN_CONV_FUSE_NONE;
   conv_desc.options = LIBXSMM_DNN_CONV_OPTION_ACTIVATION_UNSIGNED;
-  conv_desc.datatype_in = LIBXSMM_DNN_DATATYPE_I8;
-  conv_desc.datatype_out = LIBXSMM_DNN_DATATYPE_I32;
+  conv_desc.datatype = LIBXSMM_DNN_DATATYPE_I8;
 
-  libxsmm_handle = libxsmm_dnn_create_conv_handle_check( conv_desc, &status );
+  libxsmm_handle = libxsmm_dnn_create_conv_layer( conv_desc, &status );
   CHKERR_LIBXSMM_DNN( status );
 
   /* setup LIBXSMM buffers and filter */
-  libxsmm_input = libxsmm_dnn_link_input_buffer_check( libxsmm_handle, input_libxsmm, LIBXSMM_DNN_CONV_FORMAT_LIBXSMM_PTR, &status );
+  libxsmm_input = libxsmm_dnn_link_buffer( libxsmm_handle, LIBXSMM_DNN_INPUT, input_libxsmm, LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM_PTR, &status );
   CHKERR_LIBXSMM_DNN( status );
-  libxsmm_output = libxsmm_dnn_link_output_buffer_check( libxsmm_handle, output_libxsmm, LIBXSMM_DNN_CONV_FORMAT_LIBXSMM_PTR, &status );
+  libxsmm_output = libxsmm_dnn_link_buffer( libxsmm_handle, LIBXSMM_DNN_OUTPUT, output_libxsmm, LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM_PTR, &status );
   CHKERR_LIBXSMM_DNN( status );
-  libxsmm_filter = libxsmm_dnn_link_filter_check( libxsmm_handle, filter_libxsmm, LIBXSMM_DNN_CONV_FORMAT_LIBXSMM_PTR, &status );
+  libxsmm_filter = libxsmm_dnn_link_filter( libxsmm_handle, LIBXSMM_DNN_FILTER, filter_libxsmm, LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM_PTR, &status );
   CHKERR_LIBXSMM_DNN( status );
 
   /* copy in data to LIBXSMM format */
   /* we can also use the layout functions and set the data on our
      own external to the library, @TODO, we plan to add an example here */
-  CHKERR_LIBXSMM_DNN( libxsmm_dnn_copyin_buffer( libxsmm_input, (void*)naive_input, LIBXSMM_DNN_CONV_FORMAT_NCHW ) );
+  CHKERR_LIBXSMM_DNN( libxsmm_dnn_copyin_buffer( libxsmm_input, (void*)naive_input, LIBXSMM_DNN_TENSOR_FORMAT_NCHW ) );
   CHKERR_LIBXSMM_DNN( libxsmm_dnn_zero_buffer( libxsmm_output ) );
-  CHKERR_LIBXSMM_DNN( libxsmm_dnn_copyin_filter( libxsmm_filter, (void*)naive_filter, LIBXSMM_DNN_CONV_FORMAT_KCRS ) );
+  CHKERR_LIBXSMM_DNN( libxsmm_dnn_copyin_filter( libxsmm_filter, (void*)naive_filter, LIBXSMM_DNN_TENSOR_FORMAT_KCRS ) );
 
   /* bind buffers and filter to handle */
-  CHKERR_LIBXSMM_DNN( libxsmm_dnn_bind_input_buffer( libxsmm_handle, libxsmm_input ) );
-  CHKERR_LIBXSMM_DNN( libxsmm_dnn_bind_output_buffer( libxsmm_handle, libxsmm_output ) );
-  CHKERR_LIBXSMM_DNN( libxsmm_dnn_bind_filter( libxsmm_handle, libxsmm_filter ) );
+  CHKERR_LIBXSMM_DNN( libxsmm_dnn_bind_buffer( libxsmm_handle, libxsmm_input, LIBXSMM_DNN_REGULAR_INPUT ) );
+  CHKERR_LIBXSMM_DNN( libxsmm_dnn_bind_buffer( libxsmm_handle, libxsmm_output, LIBXSMM_DNN_REGULAR_OUTPUT ) );
+  CHKERR_LIBXSMM_DNN( libxsmm_dnn_bind_filter( libxsmm_handle, libxsmm_filter, LIBXSMM_DNN_REGULAR_FILTER ) );
+
+  /* let's allocate and bind scratch */
+  scratch = (void*)libxsmm_aligned_malloc( libxsmm_dnn_get_scratch_size( libxsmm_handle, LIBXSMM_DNN_COMPUTE_KIND_ALL, &status ), 2097152);
+  CHKERR_LIBXSMM_DNN( status );
+  CHKERR_LIBXSMM_DNN( libxsmm_dnn_bind_scratch( libxsmm_handle, LIBXSMM_DNN_COMPUTE_KIND_ALL, scratch ) );
 
   printf("##########################################\n");
   printf("#  Check Correctness   (custom-Storage)  #\n");
   printf("##########################################\n");
-  /* run naive convolution */
-  naive_conv_int8(&naive_param, naive_input, naive_output, naive_filter);
   /* run LIBXSMM convolutions */
 #if defined(_OPENMP)
 # pragma omp parallel
@@ -439,13 +487,13 @@ int main(int argc, char* argv[])
 #else
     const int tid = 0;
 #endif
-    CHKERR_LIBXSMM_DNN( libxsmm_dnn_convolve_st( libxsmm_handle, LIBXSMM_DNN_CONV_KIND_FWD, 0, tid ) );
+    CHKERR_LIBXSMM_DNN( libxsmm_dnn_execute_st( libxsmm_handle, LIBXSMM_DNN_COMPUTE_KIND_FWD, 0, tid ) );
   }
   /* copy out data */
-  CHKERR_LIBXSMM_DNN( libxsmm_dnn_copyout_buffer( libxsmm_output, (void*)naive_libxsmm_output, LIBXSMM_DNN_CONV_FORMAT_NCHW ) );
+  CHKERR_LIBXSMM_DNN( libxsmm_dnn_copyout_buffer( libxsmm_output, (void*)naive_libxsmm_output, LIBXSMM_DNN_TENSOR_FORMAT_NCHW ) );
 
   /* compare */
-  compare_buf_int32(naive_output, naive_libxsmm_output, nImg*nOfm*ofhp*ofwp, &norms_fwd);
+  compare_buf_uint8(naive_output, naive_libxsmm_output, nImg*nOfm*ofhp*ofwp, &norms_fwd);
   printf("             1-norm of reference: %f\n", norms_fwd.one_norm_ref);
   printf("              1-norm of JIT-code: %f\n", norms_fwd.one_norm_test);
   printf("       L2-error-norm of JIT-code: %f\n", norms_fwd.l2_rel_err);
@@ -466,7 +514,7 @@ int main(int argc, char* argv[])
 #else
       const int tid = 0;
 #endif
-      libxsmm_dnn_convolve_st( libxsmm_handle, LIBXSMM_DNN_CONV_KIND_FWD, 0, tid );
+      libxsmm_dnn_execute_st( libxsmm_handle, LIBXSMM_DNN_COMPUTE_KIND_FWD, 0, tid );
     }
   }
   l_end = libxsmm_timer_tick();
@@ -482,10 +530,18 @@ int main(int argc, char* argv[])
      norms_fwd.max_rel_err, norms_fwd.max_abs_err, norms_fwd.l2_rel_err, norms_fwd.one_norm_ref, norms_fwd.one_norm_test );
 
   /* clean-up */
+  CHKERR_LIBXSMM_DNN( libxsmm_dnn_release_scratch( libxsmm_handle, LIBXSMM_DNN_COMPUTE_KIND_ALL ) );
+  libxsmm_free(scratch);
+  CHKERR_LIBXSMM_DNN( libxsmm_dnn_release_buffer( libxsmm_handle, LIBXSMM_DNN_REGULAR_INPUT ) );
+  /*CHKERR_LIBXSMM_DNN( libxsmm_dnn_release_buffer( libxsmm_handle, LIBXSMM_DNN_GRADIENT_INPUT ) );*/
+  CHKERR_LIBXSMM_DNN( libxsmm_dnn_release_buffer( libxsmm_handle, LIBXSMM_DNN_REGULAR_OUTPUT ) );
+  /*CHKERR_LIBXSMM_DNN( libxsmm_dnn_release_buffer( libxsmm_handle, LIBXSMM_DNN_GRADIENT_OUTPUT ) );*/
+  CHKERR_LIBXSMM_DNN( libxsmm_dnn_release_filter( libxsmm_handle, LIBXSMM_DNN_REGULAR_FILTER ) );
+  /*CHKERR_LIBXSMM_DNN( libxsmm_dnn_release_filter( libxsmm_handle, LIBXSMM_DNN_GRADIENT_FILTER ) );*/
   CHKERR_LIBXSMM_DNN( libxsmm_dnn_destroy_buffer( libxsmm_input ) );
   CHKERR_LIBXSMM_DNN( libxsmm_dnn_destroy_buffer( libxsmm_output ) );
   CHKERR_LIBXSMM_DNN( libxsmm_dnn_destroy_filter( libxsmm_filter ) );
-  CHKERR_LIBXSMM_DNN( libxsmm_dnn_destroy_conv_handle( libxsmm_handle ) );
+  CHKERR_LIBXSMM_DNN( libxsmm_dnn_destroy_conv_layer( libxsmm_handle ) );
 
   /* deallocate data */
   libxsmm_free(naive_input);

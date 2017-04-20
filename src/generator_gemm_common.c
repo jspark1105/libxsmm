@@ -34,16 +34,17 @@
 #include "generator_x86_instructions.h"
 
 #include <libxsmm_intrinsics_x86.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
+#include <stdio.h>
 
 LIBXSMM_INTERNAL_API_DEFINITION
 void libxsmm_generator_gemm_init_micro_kernel_config_fullvector( libxsmm_micro_kernel_config*    io_micro_kernel_config,
                                                                   const libxsmm_gemm_descriptor* i_xgemm_desc,
                                                                   const char*                    i_arch,
                                                                   const unsigned int             i_use_masking_a_c ) {
-  if( strcmp( i_arch, "wsm" ) == 0 ) {
+  if ( strcmp( i_arch, "wsm" ) == 0 ) {
     io_micro_kernel_config->instruction_set = LIBXSMM_X86_SSE3;
     io_micro_kernel_config->vector_reg_count = 16;
     io_micro_kernel_config->use_masking_a_c = i_use_masking_a_c;
@@ -85,7 +86,7 @@ void libxsmm_generator_gemm_init_micro_kernel_config_fullvector( libxsmm_micro_k
       io_micro_kernel_config->vmul_instruction = LIBXSMM_X86_INSTR_MULPS;
       io_micro_kernel_config->vadd_instruction = LIBXSMM_X86_INSTR_ADDPS;
     }
-  } else if( strcmp( i_arch, "snb" ) == 0 ) {
+  } else if ( strcmp( i_arch, "snb" ) == 0 ) {
     io_micro_kernel_config->instruction_set = LIBXSMM_X86_AVX;
     io_micro_kernel_config->vector_reg_count = 16;
     io_micro_kernel_config->use_masking_a_c = i_use_masking_a_c;
@@ -171,11 +172,14 @@ void libxsmm_generator_gemm_init_micro_kernel_config_fullvector( libxsmm_micro_k
     }
   } else if ( (strcmp( i_arch, "knc" ) == 0) ||
               (strcmp( i_arch, "knl" ) == 0) ||
-              (strcmp( i_arch, "skx" ) == 0)    ) {
+              (strcmp( i_arch, "knm" ) == 0) ||
+              (strcmp( i_arch, "skx" ) == 0) ) {
     if ((strcmp( i_arch, "knc" ) == 0)) {
       io_micro_kernel_config->instruction_set = LIBXSMM_X86_IMCI;
     } else if ((strcmp( i_arch, "knl" ) == 0)) {
       io_micro_kernel_config->instruction_set = LIBXSMM_X86_AVX512_MIC;
+    } else if ((strcmp( i_arch, "knm" ) == 0)) {
+      io_micro_kernel_config->instruction_set = LIBXSMM_X86_AVX512_KNM;
     } else {
       io_micro_kernel_config->instruction_set = LIBXSMM_X86_AVX512_CORE;
     }
@@ -219,7 +223,21 @@ void libxsmm_generator_gemm_init_micro_kernel_config_fullvector( libxsmm_micro_k
       io_micro_kernel_config->vmul_instruction = LIBXSMM_X86_INSTR_VFMADD231PS;
       io_micro_kernel_config->vadd_instruction = LIBXSMM_X86_INSTR_VADDPS;
     }
-  } else { }
+  } else {
+    io_micro_kernel_config->instruction_set = LIBXSMM_X86_GENERIC;
+    io_micro_kernel_config->vector_reg_count = 0;
+    io_micro_kernel_config->use_masking_a_c = 0;
+    io_micro_kernel_config->vector_name = 'a';
+    io_micro_kernel_config->vector_length = 0;
+    io_micro_kernel_config->datatype_size = 0;
+    io_micro_kernel_config->a_vmove_instruction = LIBXSMM_X86_INSTR_UNDEF;
+    io_micro_kernel_config->b_vmove_instruction = LIBXSMM_X86_INSTR_UNDEF;
+    io_micro_kernel_config->b_shuff_instruction = LIBXSMM_X86_INSTR_UNDEF;
+    io_micro_kernel_config->c_vmove_instruction = LIBXSMM_X86_INSTR_UNDEF;
+    io_micro_kernel_config->vxor_instruction = LIBXSMM_X86_INSTR_UNDEF;
+    io_micro_kernel_config->vmul_instruction = LIBXSMM_X86_INSTR_UNDEF;
+    io_micro_kernel_config->vadd_instruction = LIBXSMM_X86_INSTR_UNDEF;
+  }
 
   io_micro_kernel_config->prefetch_instruction = LIBXSMM_X86_INSTR_PREFETCHT1;
   io_micro_kernel_config->alu_add_instruction = LIBXSMM_X86_INSTR_ADDQ;
@@ -234,12 +252,12 @@ void libxsmm_generator_gemm_init_micro_kernel_config_halfvector( libxsmm_micro_k
                                                                   const libxsmm_gemm_descriptor* i_xgemm_desc,
                                                                   const char*                    i_arch,
                                                                   const unsigned int             i_use_masking_a_c ) {
-  if( strcmp( i_arch, "wsm" ) == 0 ) {
+  if ( strcmp( i_arch, "wsm" ) == 0 ) {
 #if !defined(NDEBUG)
     fprintf(stderr, "LIBXSMM WARNING, libxsmm_generator_gemm_init_micro_kernel_config_halfvector, redirecting to scalar, please fix the generation code!!!\n");
 #endif
     libxsmm_generator_gemm_init_micro_kernel_config_scalar( io_micro_kernel_config, i_xgemm_desc, i_arch, i_use_masking_a_c );
-  } else if( strcmp( i_arch, "snb" ) == 0 ) {
+  } else if ( strcmp( i_arch, "snb" ) == 0 ) {
     io_micro_kernel_config->instruction_set = LIBXSMM_X86_AVX;
     io_micro_kernel_config->vector_reg_count = 16;
     io_micro_kernel_config->use_masking_a_c = i_use_masking_a_c;
@@ -325,12 +343,27 @@ void libxsmm_generator_gemm_init_micro_kernel_config_halfvector( libxsmm_micro_k
     }
   } else if ( (strcmp( i_arch, "knc" ) == 0) ||
               (strcmp( i_arch, "knl" ) == 0) ||
-              (strcmp( i_arch, "skx" ) == 0)    ) {
+              (strcmp( i_arch, "knm" ) == 0) ||
+              (strcmp( i_arch, "skx" ) == 0) ) {
 #if !defined(NDEBUG)
     fprintf(stderr, "LIBXSMM WARNING, libxsmm_generator_gemm_init_micro_kernel_config_halfvector, IMCI/AVX512 redirecting to fullvector, please fix the generation code!!!\n");
 #endif
     libxsmm_generator_gemm_init_micro_kernel_config_fullvector( io_micro_kernel_config, i_xgemm_desc, i_arch, i_use_masking_a_c );
-  } else {  }
+  } else {
+    io_micro_kernel_config->instruction_set = LIBXSMM_X86_GENERIC;
+    io_micro_kernel_config->vector_reg_count = 0;
+    io_micro_kernel_config->use_masking_a_c = 0;
+    io_micro_kernel_config->vector_name = 'a';
+    io_micro_kernel_config->vector_length = 0;
+    io_micro_kernel_config->datatype_size = 0;
+    io_micro_kernel_config->a_vmove_instruction = LIBXSMM_X86_INSTR_UNDEF;
+    io_micro_kernel_config->b_vmove_instruction = LIBXSMM_X86_INSTR_UNDEF;
+    io_micro_kernel_config->b_shuff_instruction = LIBXSMM_X86_INSTR_UNDEF;
+    io_micro_kernel_config->c_vmove_instruction = LIBXSMM_X86_INSTR_UNDEF;
+    io_micro_kernel_config->vxor_instruction = LIBXSMM_X86_INSTR_UNDEF;
+    io_micro_kernel_config->vmul_instruction = LIBXSMM_X86_INSTR_UNDEF;
+    io_micro_kernel_config->vadd_instruction = LIBXSMM_X86_INSTR_UNDEF;
+  }
 
   io_micro_kernel_config->prefetch_instruction = LIBXSMM_X86_INSTR_PREFETCHT1;
   io_micro_kernel_config->alu_add_instruction = LIBXSMM_X86_INSTR_ADDQ;
@@ -345,7 +378,7 @@ void libxsmm_generator_gemm_init_micro_kernel_config_scalar( libxsmm_micro_kerne
                                                               const libxsmm_gemm_descriptor* i_xgemm_desc,
                                                               const char*                    i_arch,
                                                               const unsigned int             i_use_masking_a_c ) {
-  if( strcmp( i_arch, "wsm" ) == 0 ) {
+  if ( strcmp( i_arch, "wsm" ) == 0 ) {
     io_micro_kernel_config->instruction_set = LIBXSMM_X86_SSE3;
     io_micro_kernel_config->vector_reg_count = 16;
     io_micro_kernel_config->use_masking_a_c = i_use_masking_a_c;
@@ -371,7 +404,7 @@ void libxsmm_generator_gemm_init_micro_kernel_config_scalar( libxsmm_micro_kerne
       io_micro_kernel_config->vmul_instruction = LIBXSMM_X86_INSTR_MULSS;
       io_micro_kernel_config->vadd_instruction = LIBXSMM_X86_INSTR_ADDSS;
     }
-  } else if( strcmp( i_arch, "snb" ) == 0 ) {
+  } else if ( strcmp( i_arch, "snb" ) == 0 ) {
     io_micro_kernel_config->instruction_set = LIBXSMM_X86_AVX;
     io_micro_kernel_config->vector_reg_count = 16;
     io_micro_kernel_config->use_masking_a_c = i_use_masking_a_c;
@@ -425,7 +458,8 @@ void libxsmm_generator_gemm_init_micro_kernel_config_scalar( libxsmm_micro_kerne
     }
   } else if ( (strcmp( i_arch, "knc" ) == 0) ||
               (strcmp( i_arch, "knl" ) == 0) ||
-              (strcmp( i_arch, "skx" ) == 0)    ) {
+              (strcmp( i_arch, "knm" ) == 0) ||
+              (strcmp( i_arch, "skx" ) == 0) ) {
     if ((strcmp( i_arch, "knc" ) == 0)) {
       io_micro_kernel_config->instruction_set = LIBXSMM_X86_IMCI;
 #if !defined(NDEBUG)
@@ -434,6 +468,8 @@ void libxsmm_generator_gemm_init_micro_kernel_config_scalar( libxsmm_micro_kerne
       libxsmm_generator_gemm_init_micro_kernel_config_fullvector( io_micro_kernel_config, i_xgemm_desc, i_arch, i_use_masking_a_c );
     } else if ((strcmp( i_arch, "knl" ) == 0)) {
       io_micro_kernel_config->instruction_set = LIBXSMM_X86_AVX512_MIC;
+    } else if ((strcmp( i_arch, "knm" ) == 0)) {
+      io_micro_kernel_config->instruction_set = LIBXSMM_X86_AVX512_KNM;
     } else {
       io_micro_kernel_config->instruction_set = LIBXSMM_X86_AVX512_CORE;
     }
@@ -461,7 +497,21 @@ void libxsmm_generator_gemm_init_micro_kernel_config_scalar( libxsmm_micro_kerne
       io_micro_kernel_config->vmul_instruction = LIBXSMM_X86_INSTR_VFMADD231SS;
       io_micro_kernel_config->vadd_instruction = LIBXSMM_X86_INSTR_VADDSS;
     }
-  } else {  }
+  } else {
+    io_micro_kernel_config->instruction_set = LIBXSMM_X86_GENERIC;
+    io_micro_kernel_config->vector_reg_count = 0;
+    io_micro_kernel_config->use_masking_a_c = 0;
+    io_micro_kernel_config->vector_name = 'a';
+    io_micro_kernel_config->vector_length = 0;
+    io_micro_kernel_config->datatype_size = 0;
+    io_micro_kernel_config->a_vmove_instruction = LIBXSMM_X86_INSTR_UNDEF;
+    io_micro_kernel_config->b_vmove_instruction = LIBXSMM_X86_INSTR_UNDEF;
+    io_micro_kernel_config->b_shuff_instruction = LIBXSMM_X86_INSTR_UNDEF;
+    io_micro_kernel_config->c_vmove_instruction = LIBXSMM_X86_INSTR_UNDEF;
+    io_micro_kernel_config->vxor_instruction = LIBXSMM_X86_INSTR_UNDEF;
+    io_micro_kernel_config->vmul_instruction = LIBXSMM_X86_INSTR_UNDEF;
+    io_micro_kernel_config->vadd_instruction = LIBXSMM_X86_INSTR_UNDEF;
+  }
 
   io_micro_kernel_config->prefetch_instruction = LIBXSMM_X86_INSTR_PREFETCHT1;
   io_micro_kernel_config->alu_add_instruction = LIBXSMM_X86_INSTR_ADDQ;
@@ -639,14 +689,17 @@ void libxsmm_generator_gemm_load_C( libxsmm_generated_code*             io_gener
                                      const libxsmm_gemm_descriptor*     i_xgemm_desc,
                                      const unsigned int                 i_m_blocking,
                                      const unsigned int                 i_n_blocking ) {
-  /* deriving register blocking from kernel config */
-  const unsigned int l_m_blocking = i_m_blocking/i_micro_kernel_config->vector_length;
-  /* start register of accumulator */
-  const unsigned int l_vec_reg_acc_start = i_micro_kernel_config->vector_reg_count - (i_n_blocking * l_m_blocking);
+  unsigned int l_m_blocking, l_vec_reg_acc_start;
   /* register blocking counter in n */
   unsigned int l_n = 0;
   /* register blocking counter in m */
   unsigned int l_m = 0;
+
+  assert(0 < i_micro_kernel_config->vector_length);
+  /* deriving register blocking from kernel config */
+  l_m_blocking = i_m_blocking / i_micro_kernel_config->vector_length;
+  /* start register of accumulator */
+  l_vec_reg_acc_start = i_micro_kernel_config->vector_reg_count - (i_n_blocking * l_m_blocking);
 
 #if !defined(NDEBUG)
   /* Do some test if it's possible to generated the requested code.
@@ -654,14 +707,14 @@ void libxsmm_generator_gemm_load_C( libxsmm_generated_code*             io_gener
      things might happen.... HUAAH */
   if (i_micro_kernel_config->instruction_set == LIBXSMM_X86_SSE3 ||
       i_micro_kernel_config->instruction_set == LIBXSMM_X86_AVX  ||
-      i_micro_kernel_config->instruction_set == LIBXSMM_X86_AVX2    ) {
+      i_micro_kernel_config->instruction_set == LIBXSMM_X86_AVX2 ) {
     if ( (i_n_blocking > 3) || (i_n_blocking < 1) || (i_m_blocking < 1) ) {
       libxsmm_handle_error( io_generated_code, LIBXSMM_ERR_REG_BLOCK );
       return;
     }
   } else if (i_micro_kernel_config->instruction_set == LIBXSMM_X86_IMCI        ||
              i_micro_kernel_config->instruction_set == LIBXSMM_X86_AVX512_MIC  ||
-             ( (i_micro_kernel_config->instruction_set == LIBXSMM_X86_AVX512_CORE) && (i_m_blocking == i_micro_kernel_config->vector_length) )  ) {
+             ( (i_micro_kernel_config->instruction_set == LIBXSMM_X86_AVX512_CORE) && (i_m_blocking == i_micro_kernel_config->vector_length) ) ) {
     if ( (i_n_blocking > 30) || (i_n_blocking < 1) || (i_m_blocking != i_micro_kernel_config->vector_length) ) {
       libxsmm_handle_error( io_generated_code, LIBXSMM_ERR_REG_BLOCK );
       return;
@@ -754,14 +807,14 @@ void libxsmm_generator_gemm_store_C( libxsmm_generated_code*             io_gene
 #if !defined(NDEBUG)
   if (i_micro_kernel_config->instruction_set == LIBXSMM_X86_SSE3 ||
       i_micro_kernel_config->instruction_set == LIBXSMM_X86_AVX  ||
-      i_micro_kernel_config->instruction_set == LIBXSMM_X86_AVX2    ) {
+      i_micro_kernel_config->instruction_set == LIBXSMM_X86_AVX2 ) {
     if ( (i_n_blocking > 3) || (i_n_blocking < 1) || (i_m_blocking < 1) ) {
       libxsmm_handle_error( io_generated_code, LIBXSMM_ERR_REG_BLOCK );
       return;
     }
   } else if (i_micro_kernel_config->instruction_set == LIBXSMM_X86_IMCI        ||
              i_micro_kernel_config->instruction_set == LIBXSMM_X86_AVX512_MIC  ||
-             ( (i_micro_kernel_config->instruction_set == LIBXSMM_X86_AVX512_CORE) && (i_m_blocking == i_micro_kernel_config->vector_length) )  ) {
+             ( (i_micro_kernel_config->instruction_set == LIBXSMM_X86_AVX512_CORE) && (i_m_blocking == i_micro_kernel_config->vector_length) ) ) {
     if ( (i_n_blocking > 30) || (i_n_blocking < 1) || (i_m_blocking != i_micro_kernel_config->vector_length) ) {
       libxsmm_handle_error( io_generated_code, LIBXSMM_ERR_REG_BLOCK );
       return;

@@ -35,9 +35,7 @@
 # pragma offload_attribute(push,target(LIBXSMM_OFFLOAD_TARGET))
 #endif
 #include <stdlib.h>
-#if !defined(NDEBUG)
-# include <stdio.h>
-#endif
+#include <stdio.h>
 #if defined(LIBXSMM_OFFLOAD_TARGET)
 # pragma offload_attribute(pop)
 #endif
@@ -46,11 +44,13 @@
 
 
 #if defined(LIBXSMM_EXT_TASKS)
-LIBXSMM_INLINE LIBXSMM_RETARGETABLE void internal_ext_otrans(void *LIBXSMM_RESTRICT out, const void *LIBXSMM_RESTRICT in,
-  unsigned int typesize, libxsmm_blasint m0, libxsmm_blasint m1, libxsmm_blasint n0, libxsmm_blasint n1,
-  libxsmm_blasint ldi, libxsmm_blasint ldo)
+LIBXSMM_INLINE LIBXSMM_RETARGETABLE void internal_ext_otrans(libxsmm_xtransfunction xtrans,
+  void *LIBXSMM_RESTRICT out, const void *LIBXSMM_RESTRICT in, unsigned int typesize,
+  unsigned int ldi, unsigned int ldo, unsigned int tile_m, unsigned int tile_n,
+  unsigned int m0, unsigned int m1, unsigned int n0, unsigned int n1)
 {
-  LIBXSMM_OTRANS_MAIN(LIBXSMM_EXT_TSK_KERNEL_VARS, internal_ext_otrans, out, in, typesize, m0, m1, n0, n1, ldi, ldo);
+  LIBXSMM_OTRANS_MAIN(internal_ext_otrans, LIBXSMM_EXT_TSK_KERNEL_ARGS, xtrans,
+    out, in, typesize, ldi, ldo, tile_m, tile_n, m0, m1, n0, n1);
 }
 #endif /*defined(LIBXSMM_EXT_TASKS)*/
 
@@ -59,27 +59,33 @@ LIBXSMM_API_DEFINITION int libxsmm_otrans_omp(void* out, const void* in, unsigne
   libxsmm_blasint m, libxsmm_blasint n, libxsmm_blasint ldi, libxsmm_blasint ldo)
 {
   int result = EXIT_SUCCESS;
-#if !defined(NDEBUG) /* library code is expected to be mute */
   static int error_once = 0;
-#endif
   assert(0 < typesize);
   if (ldi >= m && ldo >= n && 0 != out && 0 != in) {
     LIBXSMM_INIT
     if (out != in) {
-#if defined(LIBXSMM_EXT_TASKS)
-      if (0 != libxsmm_mt /* enable OpenMP support, ... */
-        /* ... but consider a threshold of the problem-size */
-        && ((LIBXSMM_EXT_TRANS_MT_THRESHOLD) < (m * n)))
-      {
-        if (0 == LIBXSMM_MOD2(libxsmm_mt, 2)) { /* even: enable internal parallelization */
-          LIBXSMM_EXT_TSK_PARALLEL_ONLY
-          internal_ext_otrans(out, in, typesize, 0, m, 0, n, ldi, ldo);
+#if defined(LIBXSMM_EXT_TASKS) /* implies _OPENMP */
+      if ((LIBXSMM_EXT_TRANS_MT_THRESHOLD) < (m * n)) { /* consider problem-size (threshold) */
+        const int tindex = (4 < typesize ? 0 : 1), index = LIBXSMM_MIN(LIBXSMM_SQRT2(1ULL * m * n) >> 10, 7);
+        const unsigned int tm = libxsmm_trans_tile[tindex][0/*M*/][index];
+        const unsigned int tn = libxsmm_trans_tile[tindex][1/*N*/][index];
+        libxsmm_xtransfunction xtrans = 0;
+#if defined(LIBXSMM_JIT_TRANS) /* TODO: enable inner JIT'ted transpose kernel */
+        if (libxsmm_trans_chunksize == ldo) { /* TODO: limitation */
+          libxsmm_transpose_descriptor descriptor;
+          descriptor.m = descriptor.n = libxsmm_trans_chunksize; descriptor.typesize = typesize;
+          xtrans = libxsmm_xtransdispatch(&descriptor);
+        }
+#endif
+        if (0 == omp_get_level()) { /* enable internal parallelization */
+          LIBXSMM_EXT_TSK_PARALLEL
+          internal_ext_otrans(xtrans, out, in, typesize, ldi, ldo, tm, tn, 0, m, 0, n);
           /* implicit synchronization (barrier) */
         }
-        else { /* odd: prepare for external parallelization */
-          LIBXSMM_EXT_SINGLE
-          internal_ext_otrans(out, in, typesize, 0, m, 0, n, ldi, ldo);
-          if (1 == libxsmm_mt) { /* allow to omit synchronization */
+        else { /* assume external parallelization */
+          internal_ext_otrans(xtrans, out, in, typesize, ldi, ldo, tm, tn, 0, m, 0, n);
+          /* allow to omit synchronization */
+          if (0 != libxsmm_sync) {
             LIBXSMM_EXT_TSK_SYNC
           }
         }
@@ -94,17 +100,18 @@ LIBXSMM_API_DEFINITION int libxsmm_otrans_omp(void* out, const void* in, unsigne
       result = libxsmm_itrans/*TODO: omp*/(out, typesize, m, n, ldi);
     }
     else {
-#if !defined(NDEBUG) /* library code is expected to be mute */
-      if (1 == LIBXSMM_ATOMIC_ADD_FETCH(&error_once, 1, LIBXSMM_ATOMIC_RELAXED)) {
+      if (0 != libxsmm_verbosity /* library code is expected to be mute */
+       && 1 == LIBXSMM_ATOMIC_ADD_FETCH(&error_once, 1, LIBXSMM_ATOMIC_RELAXED))
+      {
         fprintf(stderr, "LIBXSMM: output location of the transpose must be different from the input!\n");
       }
-#endif
       result = EXIT_FAILURE;
     }
   }
   else {
-#if !defined(NDEBUG) /* library code is expected to be mute */
-    if (1 == LIBXSMM_ATOMIC_ADD_FETCH(&error_once, 1, LIBXSMM_ATOMIC_RELAXED)) {
+    if (0 != libxsmm_verbosity /* library code is expected to be mute */
+     && 1 == LIBXSMM_ATOMIC_ADD_FETCH(&error_once, 1, LIBXSMM_ATOMIC_RELAXED))
+    {
       if (0 == out || 0 == in) {
         fprintf(stderr, "LIBXSMM: the transpose input and/or output is NULL!\n");
       }
@@ -119,7 +126,6 @@ LIBXSMM_API_DEFINITION int libxsmm_otrans_omp(void* out, const void* in, unsigne
         fprintf(stderr, "LIBXSMM: the leading dimension of the transpose output is too small!\n");
       }
     }
-#endif
     result = EXIT_FAILURE;
   }
 

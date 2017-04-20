@@ -26,7 +26,7 @@
 ** NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS        **
 ** SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.              **
 ******************************************************************************/
-/* Alexander Heinecke (Intel Corp.), Hans Pabst (Intel Corp.)
+/* Alexander Heinecke, Hans Pabst (Intel Corp.)
 ******************************************************************************/
 #include <libxsmm_sync.h>
 #include <libxsmm_intrinsics_x86.h>
@@ -58,16 +58,6 @@
 #endif
 #if !defined(LIBXSMM_SYNC_ATOMIC_SET)
 # define LIBXSMM_SYNC_ATOMIC_SET(DST, VALUE) ((DST) = (VALUE))
-#endif
-#if !defined(LIBXSMM_SYNC_MALLOC_INTRINSIC) && !defined(LIBXSMM_INTRINSICS_NONE)
-# define LIBXSMM_SYNC_MALLOC_INTRINSIC
-#endif
-#if defined(LIBXSMM_SYNC_MALLOC_INTRINSIC)
-# define LIBXSMM_SYNC_MALLOC(SIZE, ALIGNMENT) _mm_malloc(SIZE, ALIGNMENT)
-# define LIBXSMM_SYNC_FREE(BUFFER) _mm_free((void*)(BUFFER))
-#else
-# define LIBXSMM_SYNC_MALLOC(SIZE, ALIGNMENT) libxsmm_aligned_malloc(SIZE, -(ALIGNMENT))
-# define LIBXSMM_SYNC_FREE(BUFFER) libxsmm_free(BUFFER)
 #endif
 #if defined(__MIC__)
 # define LIBXSMM_SYNC_PAUSE(DELAY) _mm_delay_32(DELAY)
@@ -111,7 +101,7 @@ struct LIBXSMM_RETARGETABLE libxsmm_barrier {
 
 LIBXSMM_API_DEFINITION libxsmm_barrier* libxsmm_barrier_create(int ncores, int nthreads_per_core)
 {
-  libxsmm_barrier *const barrier = (libxsmm_barrier*)LIBXSMM_SYNC_MALLOC(
+  libxsmm_barrier *const barrier = (libxsmm_barrier*)libxsmm_aligned_malloc(
     sizeof(libxsmm_barrier), LIBXSMM_SYNC_CACHELINE_SIZE);
 #if defined(_REENTRANT)
   barrier->ncores = ncores;
@@ -119,9 +109,9 @@ LIBXSMM_API_DEFINITION libxsmm_barrier* libxsmm_barrier_create(int ncores, int n
   barrier->nthreads_per_core = nthreads_per_core;
   barrier->nthreads = ncores * nthreads_per_core;
 
-  barrier->threads = (internal_sync_thread_tag**)LIBXSMM_SYNC_MALLOC(
+  barrier->threads = (internal_sync_thread_tag**)libxsmm_aligned_malloc(
     barrier->nthreads * sizeof(internal_sync_thread_tag*), LIBXSMM_SYNC_CACHELINE_SIZE);
-  barrier->cores = (internal_sync_core_tag**)LIBXSMM_SYNC_MALLOC(
+  barrier->cores = (internal_sync_core_tag**)libxsmm_aligned_malloc(
     barrier->ncores * sizeof(internal_sync_core_tag*), LIBXSMM_SYNC_CACHELINE_SIZE);
 
   LIBXSMM_SYNC_ATOMIC_SET(barrier->threads_waiting.counter, barrier->nthreads);
@@ -147,27 +137,27 @@ LIBXSMM_API_DEFINITION void libxsmm_barrier_init(libxsmm_barrier* barrier, int t
   }
 
   /* allocate per-thread structure */
-  thread = (internal_sync_thread_tag*)LIBXSMM_SYNC_MALLOC(
+  thread = (internal_sync_thread_tag*)libxsmm_aligned_malloc(
     sizeof(internal_sync_thread_tag), LIBXSMM_SYNC_CACHELINE_SIZE);
   barrier->threads[tid] = thread;
   thread->core_tid = tid - (barrier->nthreads_per_core * cid); /* mod */
 
   /* each core's thread 0 does all the allocations */
   if (0 == thread->core_tid) {
-    core = (internal_sync_core_tag*)LIBXSMM_SYNC_MALLOC(
+    core = (internal_sync_core_tag*)libxsmm_aligned_malloc(
       sizeof(internal_sync_core_tag), LIBXSMM_SYNC_CACHELINE_SIZE);
     core->id = (uint8_t)cid;
     core->core_sense = 1;
 
-    core->thread_senses = (uint8_t*)LIBXSMM_SYNC_MALLOC(
+    core->thread_senses = (uint8_t*)libxsmm_aligned_malloc(
       barrier->nthreads_per_core * sizeof(uint8_t), LIBXSMM_SYNC_CACHELINE_SIZE);
     for (i = 0; i < barrier->nthreads_per_core; ++i) core->thread_senses[i] = 1;
 
     for (i = 0; i < 2;  ++i) {
-      core->my_flags[i] = (uint8_t*)LIBXSMM_SYNC_MALLOC(
+      core->my_flags[i] = (uint8_t*)libxsmm_aligned_malloc(
         barrier->ncores_log2 * sizeof(uint8_t) * LIBXSMM_SYNC_CACHELINE_SIZE,
         LIBXSMM_SYNC_CACHELINE_SIZE);
-      core->partner_flags[i] = (uint8_t**)LIBXSMM_SYNC_MALLOC(
+      core->partner_flags[i] = (uint8_t**)libxsmm_aligned_malloc(
         barrier->ncores_log2 * sizeof(uint8_t*),
         LIBXSMM_SYNC_CACHELINE_SIZE);
     }
@@ -244,7 +234,7 @@ void libxsmm_barrier_wait(libxsmm_barrier* barrier, int tid)
 #if defined(__MIC__)
       /* cannot use LIBXSMM_ALIGNED since attribute may not apply to local non-static arrays */
       uint8_t sendbuffer[LIBXSMM_SYNC_CACHELINE_SIZE+LIBXSMM_SYNC_CACHELINE_SIZE-1];
-      uint8_t *const sendbuf = LIBXSMM_ALIGN2(sendbuffer, LIBXSMM_SYNC_CACHELINE_SIZE);
+      uint8_t *const sendbuf = LIBXSMM_ALIGN(sendbuffer, LIBXSMM_SYNC_CACHELINE_SIZE);
       __m512d m512d;
       _mm_prefetch((const char*)core->partner_flags[core->parity][0], _MM_HINT_ET1);
       sendbuf[0] = core->sense;
@@ -294,24 +284,24 @@ LIBXSMM_API_DEFINITION void libxsmm_barrier_release(const libxsmm_barrier* barri
 {
 #if defined(_REENTRANT)
   int i;
-  if ( barrier->init_done == 2 ) {
+  if (2 == barrier->init_done) {
     for (i = 0; i < barrier->ncores; ++i) {
       int j;
-      LIBXSMM_SYNC_FREE(barrier->cores[i]->thread_senses);
+      libxsmm_free((const void*)barrier->cores[i]->thread_senses);
       for (j = 0; j < 2; ++j) {
-        LIBXSMM_SYNC_FREE(barrier->cores[i]->partner_flags[j]);
-        LIBXSMM_SYNC_FREE(barrier->cores[i]->my_flags[j]);
+        libxsmm_free((const void*)barrier->cores[i]->my_flags[j]);
+        libxsmm_free(barrier->cores[i]->partner_flags[j]);
       }
-      LIBXSMM_SYNC_FREE(barrier->cores[i]);
+      libxsmm_free(barrier->cores[i]);
     }
     for (i = 0; i < barrier->nthreads; ++i) {
-      LIBXSMM_SYNC_FREE(barrier->threads[i]);
+      libxsmm_free(barrier->threads[i]);
     }
   }
-  LIBXSMM_SYNC_FREE(barrier->cores);
-  LIBXSMM_SYNC_FREE(barrier->threads);
+  libxsmm_free(barrier->threads);
+  libxsmm_free(barrier->cores);
 #endif
-  LIBXSMM_SYNC_FREE(barrier);
+  libxsmm_free(barrier);
 }
 
 
@@ -327,15 +317,21 @@ LIBXSMM_API_DEFINITION unsigned int libxsmm_get_pid(void)
 
 LIBXSMM_API_DEFINITION unsigned int libxsmm_get_tid(void)
 {
-#if defined(__linux__)
-  return (unsigned int)syscall(__NR_gettid);
-#else /* fallback */
   static LIBXSMM_TLS unsigned int tid = (unsigned int)(-1);
   if ((unsigned int)(-1) == tid) {
     static unsigned int tc = 0; tid = tc;
     LIBXSMM_ATOMIC_ADD_FETCH(&tc, 1, LIBXSMM_ATOMIC_RELAXED);
   }
   return tid;
+}
+
+
+LIBXSMM_API_DEFINITION unsigned int libxsmm_get_tid_os(void)
+{
+#if defined(__linux__)
+  return (unsigned int)syscall(__NR_gettid);
+#else /* fallback */
+  return libxsmm_get_tid();
 #endif
 }
 

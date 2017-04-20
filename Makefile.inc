@@ -68,13 +68,11 @@ else
   OPTFLAG = -$(OPT)
 endif
 
-# Trace level
+# Instrumentation level (trace)
+ifeq (,$(strip $(INSTRUMENT)))
+  INSTRUMENT = 0
+endif
 TRACE ?= 0
-
-# Avoid more sophisticated flags of the GCC tool chain,
-# and improve compatibility with compilers supposed to be
-# compatible with the GCC tool chain
-COMPATIBLE ?= 0
 
 # Number of repeated calls (tests),
 # or used to scale the problem size
@@ -161,6 +159,12 @@ ifeq (0,$(BLAS))
   NOBLAS = 1
 endif
 endif
+
+# TBB enabled (1) or disabled (0)
+# availability depends on TBBROOT
+TBB ?= 0
+# TBB runtime compatible with oldest supported GCC
+TBB_OLDRTL ?= 0
 
 # C Compiler is used for link stage
 ifneq (Darwin,$(UNAME))
@@ -402,6 +406,31 @@ ifeq (1,$(GCC))
   endif
 endif
 
+# Make GCC version number available even when not using GCC
+ifneq (0,$(shell echo "$$((2 <= $(GCC)))"))
+  GXX_VERSION_STRING = $(CXX_VERSION_STRING)
+  GXX_VERSION_MAJOR = $(CXX_VERSION_MAJOR)
+  GXX_VERSION_MINOR = $(CXX_VERSION_MINOR)
+  GXX_VERSION_PATCH = $(CXX_VERSION_PATCH)
+else
+  GXX = $(notdir $(shell which gcc 2> /dev/null))
+  ifneq (,$(strip $(GXX)))
+    GXX_VERSION_STRING = $(shell $(GXX) --version 2> /dev/null | head -n1 | sed "s/..* \([0-9][0-9]*\.[0-9][0-9]*\.*[0-9]*\)[ \S]*.*/\1/")
+    GXX_VERSION_MAJOR = $(shell echo "$(GXX_VERSION_STRING)" | cut -d"." -f1)
+    GXX_VERSION_MINOR = $(shell echo "$(GXX_VERSION_STRING)" | cut -d"." -f2)
+    GXX_VERSION_PATCH = $(shell echo "$(GXX_VERSION_STRING)" | cut -d"." -f3)
+  endif
+endif
+ifeq (3,$(words $(GXX_VERSION_MAJOR) $(GXX_VERSION_MINOR) $(GXX_VERSION_PATCH)))
+  GXX_VERSION = $(shell echo "$$(($(GXX_VERSION_MAJOR) * 10000 + $(GXX_VERSION_MINOR) * 100 + $(GXX_VERSION_PATCH)))")
+else ifeq (2,$(words $(GXX_VERSION_MAJOR) $(GXX_VERSION_MINOR)))
+  GXX_VERSION = $(shell echo "$$(($(GXX_VERSION_MAJOR) * 10000 + $(GXX_VERSION_MINOR) * 100))")
+  GXX_VERSION_PATCH = 0
+else
+  GXX_VERSION_STRING = $(NULL)
+  GXX_VERSION = 0
+endif
+
 # Too many ICEs with Clang hence we want to know if we are on Clang
 ifeq (0,$(GCC)) # not GCC
 ifeq (0,$(INTEL)) # not Intel
@@ -457,7 +486,22 @@ else ifneq (0,$(GCC))
   SUITE = GNU Compiler Collection
 else
   SUITE = Compiler
+  ifeq (0,$(CLANG))
+    COMPATIBLE ?= 1
+  endif
+  ifneq (0,$(COMPATIBLE))
+  ifeq (Cray,$(shell $(CC) -V 2>&1 | head -n1 | cut -d' ' -f1))
+    LDFLAGS += -hsystem_alloc
+    CRAY ?= 1
+  endif
+  endif
 endif
+CRAY ?= 0
+
+# Avoid more sophisticated flags of the GCC tool chain,
+# and improve compatibility with compilers supposed to be
+# compatible with the GCC tool chain
+COMPATIBLE ?= 0
 
 ifneq (0,$(INTEL))
   AR ?= xiar
@@ -507,10 +551,12 @@ ifneq (0,$(INTEL))
       CFLAGS += -ipo
       FCFLAGS += -ipo
     endif
-    ifneq (0,$(TRACE))
-      SYM = $(TRACE)
+    ifneq (0,$(INSTRUMENT))
+      SYM = $(INSTRUMENT)
     else ifeq (0,$(shell echo "$$((0 > $(SYM)))"))
       DFLAGS += -DNDEBUG
+    else
+      DFLAGS += -D_DEBUG
     endif
   else # debugging enabled
     ifneq (0,$(shell echo "$$((1 < $(DBG) || 0 > $(DBG)))"))
@@ -521,16 +567,20 @@ ifneq (0,$(INTEL))
     FCFLAGS += -O0 -check
     SYM = $(DBG)
   endif
-  ifneq (0,$(TRACE))
+  ifneq (0,$(INSTRUMENT))
     CXXFLAGS += -finstrument-functions
     CFLAGS += -finstrument-functions
     FCFLAGS += -finstrument-functions
-    DFLAGS += -D__TRACE=$(TRACE)
-    ifneq (0,$(DEPSTATIC))
-    ifneq (Darwin,$(UNAME))
-      LDFLAGS += -Wl,--export-dynamic
-    endif
-    endif
+    DFLAGS += -D__TRACE=$(INSTRUMENT)
+  endif
+  ifneq (0,$(TRACE))
+  ifneq (0,$(DEPSTATIC))
+  ifneq (Darwin,$(UNAME))
+  ifneq (Windows_NT,$(UNAME))
+    LDFLAGS += -Wl,--export-dynamic
+  endif
+  endif
+  endif
   endif
   ifneq (0,$(shell echo "$$((3 > $(DBG)))"))
     ifeq (0,$(COMPATIBLE))
@@ -605,6 +655,10 @@ ifneq (0,$(INTEL))
     CFLAGS += $(OMPFLAG)
     FCFLAGS += $(OMPFLAG)
     LDFLAGS += $(OMPFLAG)
+  else ifneq (0,$(OFFLOAD))
+    CXXFLAGS += -qoverride_limits
+    CFLAGS += -qoverride_limits
+    FCFLAGS += -qoverride_limits
   endif
   ifeq (1,$(STATIC))
     SLDFLAGS += -no-intel-extensions -static-intel -static-libgcc -static-libstdc++
@@ -646,7 +700,7 @@ else # GCC assumed
   endif
   ifeq (0,$(COMPATIBLE))
     FSTD = -std=f2003
-    CPEDANTIC += -pedantic -Wno-variadic-macros -Wno-long-long -Wno-overlength-strings
+    CPEDANTIC += -pedantic -Wno-overlength-strings -Wno-variadic-macros
     FPEDANTIC += -pedantic -Wunused-variable \
                  -Wcharacter-truncation -Wline-truncation \
                  -Wconversion -Wconversion-extra -Wextra \
@@ -658,28 +712,31 @@ else # GCC assumed
     endif
     FPEDANTIC += $(FWARNEXTRA)
   endif
-  ifeq (1,$(PEDANTIC))
-    CSTD = -std=c99
-    CXXFLAGS += $(CPEDANTIC)
-    CFLAGS += $(CSTD) $(CPEDANTIC)
-    FCFLAGS += -ffree-form
-    FMFLAGS += $(FSTD) -pedantic -Wunused-variable $(FWARNEXTRA)
-  else ifneq (0,$(PEDANTIC))
-    ifneq (Darwin,$(UNAME))
-      CSTD = -std=c89
-    else ifneq (0,$(shell echo "$$((1 <= $(GCC)))"))
-      CSTD = -std=c89
-    else # Clang may run into ICEs under OSX
-      CSTD = -std=c99
-    endif
-    CXXFLAGS += $(CPEDANTIC)
-    CFLAGS += $(CSTD) $(CPEDANTIC)
-    FCFLAGS += $(FSTD) $(FPEDANTIC)
-  else ifeq (0,$(COMPATIBLE))
-    CSTD = -std=c89
-    FCFLAGS += -ffree-form
-  endif
   ifeq (0,$(COMPATIBLE))
+    ifeq (1,$(PEDANTIC))
+      CSTD = -std=c99
+      CXXFLAGS += $(CPEDANTIC) -Wno-long-long
+      CFLAGS += $(CSTD) $(CPEDANTIC)
+      FCFLAGS += -ffree-form
+      FMFLAGS += $(FSTD) -pedantic -Wunused-variable $(FWARNEXTRA)
+    else ifneq (0,$(PEDANTIC))
+      ifneq (Darwin,$(UNAME))
+        CPEDANTIC += -Wno-long-long
+        CSTD = -std=c89
+      else ifneq (0,$(shell echo "$$((1 <= $(GCC)))"))
+        CPEDANTIC += -Wno-long-long
+        CSTD = -std=c89
+      else # Clang may run into ICEs under OSX
+        CSTD = -std=c99
+      endif
+      CXXFLAGS += $(CPEDANTIC) -Wno-long-long
+      CFLAGS += $(CSTD) $(CPEDANTIC)
+      FCFLAGS += $(FSTD) $(FPEDANTIC)
+    else ifeq (0,$(COMPATIBLE))
+      CPEDANTIC += -Wno-long-long
+      FCFLAGS += -ffree-form
+      CSTD = -std=c89
+    endif
     # flag specifying output directory must be last
     FMFLAGS += -J
   else # fallback
@@ -697,6 +754,12 @@ else # GCC assumed
         CXXFLAGS += -ffast-math
         CFLAGS += -ffast-math
         FCFLAGS += -ffast-math
+        ifneq (0,$(shell echo "$$((40900 <= $(GXX_VERSION)))"))
+          DFLAGS += -DLIBXSMM_OPENMP_SIMD
+          CXXFLAGS += -fopenmp-simd
+          CFLAGS += -fopenmp-simd
+          FCFLAGS += -fopenmp-simd
+        endif
       else ifneq (3,$(AVX))
         CXXFLAGS += -ffast-math
         CFLAGS += -ffast-math
@@ -709,10 +772,12 @@ else # GCC assumed
       FCFLAGS += -flto -ffat-lto-objects
       LDFLAGS += -flto
     endif
-    ifneq (0,$(TRACE))
-      SYM = $(TRACE)
+    ifneq (0,$(INSTRUMENT))
+      SYM = $(INSTRUMENT)
     else ifeq (0,$(shell echo "$$((0 > $(SYM)))"))
       DFLAGS += -DNDEBUG
+    else
+      DFLAGS += -D_DEBUG
     endif
   else
     ifneq (0,$(shell echo "$$((1 < $(DBG) || 0 > $(DBG)))"))
@@ -723,7 +788,7 @@ else # GCC assumed
     FCFLAGS += -O0
     SYM = $(DBG)
   endif
-  ifneq (0,$(TRACE))
+  ifneq (0,$(INSTRUMENT))
     CXXFLAGS += -finstrument-functions
     CFLAGS += -finstrument-functions
     FCFLAGS += -finstrument-functions
@@ -737,15 +802,19 @@ else # GCC assumed
         endif
       endif
     endif
-    ifneq (0,$(DEPSTATIC))
-    ifneq (Darwin,$(UNAME))
-      LDFLAGS += -Wl,--export-dynamic
-    endif
-    endif
+    DFLAGS += -D__TRACE=$(INSTRUMENT)
+  endif
+  ifneq (0,$(TRACE))
     ifeq (Windows_NT,$(UNAME))
       LDFLAGS += -ldbghelp
     endif
-    DFLAGS += -D__TRACE=$(TRACE)
+    ifneq (0,$(DEPSTATIC))
+    ifneq (Darwin,$(UNAME))
+    ifneq (Windows_NT,$(UNAME))
+      LDFLAGS += -Wl,--export-dynamic
+    endif
+    endif
+    endif
   endif
   ifneq (0,$(SYM))
     ifeq (1,$(SYM))
@@ -877,7 +946,7 @@ ifneq (0,$(shell CINFILE=$$(mktemp checkXXXXXX.c); \
   echo "int main(void) { return 0; }" > $${CINFILE}; \
   CTEST=$$($(CC) $(CTARGET) -c $${CINFILE} 2>&1); \
   if [ "" = "$${CTEST}" ]; then echo $$?; else echo 1; fi; \
-  rm -f $$(basename $${CINFILE} .c)*))
+  rm -f check??????.c check??????.o*))
 # revoke target flags
   CTARGET = $(NULL)
 endif
@@ -888,7 +957,7 @@ ifeq (0,$(shell FINFILE=$$(mktemp checkXXXXXX.f); \
   echo "      END PROGRAM" >> $${FINFILE}; \
   FTEST=$$($(FC) $(CTARGET) -c $${FINFILE} 2>&1); \
   if [ "" = "$${FTEST}" ]; then echo $$?; else echo 1; fi; \
-  rm -f $$(basename $${FINFILE} .f)*))
+  rm -f check??????.f check??????.o*))
 # inherit CTARGET flags
   FTARGET = $(CTARGET)
 endif
@@ -965,6 +1034,30 @@ ifneq (,$(OMPLIBFILE))
     LDFLAGS += $(call abslibrpath,$(OMPLIBFILE))
   endif
   LDFLAGS += $(call abslib,$(OMPLIBFILE))
+endif
+endif
+
+ifneq (0,$(TBB))
+ifneq (,$(TBBROOT))
+  ifneq (Windows_NT,$(UNAME))
+    TBBLIB_DIR = $(TBBROOT)/lib/intel64
+    TBBLIB_DIRGCC = gcc$(GXX_VERSION_MAJOR).$(GXX_VERSION_MINOR)
+    TBBLIB_MALLOC = $(wildcard $(TBBLIB_DIR)/$(TBBLIB_DIRGCC)/libtbbmalloc.so)
+    ifeq (,$(TBBLIB_MALLOC))
+      ifneq (0,$(TBB_OLDRTL))
+        TBBLIB_DIRGCC = $(shell ls -1 "$(TBBLIB_DIR)" | tr "\n" " " | cut -d" " -f1)
+      else
+        TBBLIB_DIRGCC = $(shell ls -1 "$(TBBLIB_DIR)" | tr "\n" " " | rev | cut -d" " -f2 | rev)
+      endif
+      TBBLIB_MALLOC = $(wildcard $(TBBLIB_DIR)/$(TBBLIB_DIRGCC)/libtbbmalloc.so)
+    endif
+    ifneq (,$(TBBLIB_MALLOC))
+      IFLAGS += -I$(TBBROOT)/include
+      DFLAGS += -D__TBB
+      LDFLAGS += $(XLIB_BEGIN) $(call abslib,$(TBBLIB_MALLOC)) $(XLIB_END)
+    endif
+  else # TODO: Windows support
+  endif
 endif
 endif
 
@@ -1138,6 +1231,9 @@ LDFLAGS := $(strip $(NOBLAS_LDFLAGS) $(BLAS_LDFLAGS))
 CLDFLAGS := $(strip $(NOBLAS_CLDFLAGS) $(BLAS_CLDFLAGS))
 DFLAGS := $(strip $(NOBLAS_DFLAGS) $(BLAS_DFLAGS))
 IFLAGS := $(strip $(NOBLAS_IFLAGS) $(BLAS_IFLAGS))
+# more cleanup
+LDFLAGS := $(subst $(NULL) $(XLIB_END) $(XLIB_BEGIN),$(NULL),$(LDFLAGS))
+CLDFLAGS := $(subst $(NULL) $(XLIB_END) $(XLIB_BEGIN),$(NULL),$(CLDFLAGS))
 
 .PRECIOUS: $(BLDDIR)/%-cpp.o $(BLDDIR)/%-c.o $(BLDDIR)/%-f.o \
            $(BLDDIR)/%-f90.o $(BLDDIR)/%-f90.o $(BLDDIR)/%-f77.o \
@@ -1153,7 +1249,7 @@ objname = $(foreach ARG, $(1),$(addprefix $(BLDDIR)/, $(patsubst %$(suffix $(ARG
 STATE := $(foreach V,$(sort $(.VARIABLES)), $(if \
   $(filter-out environment% default automatic,$(origin $V)), \
   $(if $(filter-out .SHELLSTATUS .DEFAULT_GOAL MAKEFILE_LIST MAKEOVERRIDES MAKEFLAGS \
-    $(EXCLUDE_STATE) CPUFLAGS TESTSIZE abslib soname extname objname,$V), \
+    $(EXCLUDE_STATE) CPUFLAGS TEST TESTSIZE abslib soname extname objname,$V), \
     $V=$($V)?)))
 .state: $(shell echo '$(STATE)' | $(DEPDIR)/.state.sh $(abspath .))
 

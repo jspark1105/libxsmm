@@ -54,13 +54,9 @@
 #include "libxsmm_timer.h"
 #include "libxsmm_sync.h"
 #include "libxsmm_dnn.h"
+#include "libxsmm_fsspmdm.h"
 
 /** Integer type for LAPACK/BLAS (LP64: 32-bit, and ILP64: 64-bit). */
-#if (0 != LIBXSMM_ILP64)
-# define LIBXSMM_BLASINT long long
-#else
-# define LIBXSMM_BLASINT int
-#endif
 typedef LIBXSMM_BLASINT libxsmm_blasint;
 
 /** Initialize the library; pay for setup cost at a specific point. */
@@ -102,6 +98,20 @@ LIBXSMM_API libxsmm_gemm_prefetch_type libxsmm_get_gemm_auto_prefetch(void);
 /** Set the default prefetch strategy. */
 LIBXSMM_API void libxsmm_set_gemm_auto_prefetch(libxsmm_gemm_prefetch_type strategy);
 
+/** Get information about the code registry. */
+LIBXSMM_API int libxsmm_get_registry_info(libxsmm_registry_info* info);
+
+/**
+ * Create a GEMM descriptor object (dynamically allocates memory). Use this function
+ * for binding a language where the libxsmm_gemm_descriptor type is not convenient.
+ */
+LIBXSMM_API libxsmm_gemm_descriptor* libxsmm_create_dgemm_descriptor(char transa, char transb,
+  int m, int n, int k, int lda, int ldb, int ldc, double alpha, double beta,
+  libxsmm_gemm_prefetch_type/*int*/ strategy);
+
+/** Release a GEMM descriptor object. */
+LIBXSMM_API void libxsmm_release_gemm_descriptor(const libxsmm_gemm_descriptor* descriptor);
+
 /** Query or JIT-generate a function; return zero if it does not exist or if JIT is not supported (descriptor form). */
 LIBXSMM_API libxsmm_xmmfunction libxsmm_xmmdispatch(const libxsmm_gemm_descriptor* descriptor);
 
@@ -125,6 +135,28 @@ LIBXSMM_API libxsmm_dmmfunction libxsmm_dmmdispatch(int m, int n, int k,
  */
 LIBXSMM_API libxsmm_xmmfunction libxsmm_create_dcsr_soa(const libxsmm_gemm_descriptor* descriptor,
    const unsigned int* row_ptr, const unsigned int* column_idx, const double* values);
+
+/**
+ * Code generation routine for the CSR format which multiplies a dense matrix B into a dense matrix C.
+ * The sparse matrix a is kept in registers.
+ * Call libxsmm_release_kernel in order to deallocate the JIT'ted code.
+ */
+LIBXSMM_API libxsmm_dmmfunction libxsmm_create_dcsr_reg(const libxsmm_gemm_descriptor* descriptor,
+   const unsigned int* row_ptr, const unsigned int* column_idx, const double* values);
+
+/**
+ * Code generation routine for the CSR format which multiplies a dense matrix B into a dense matrix C.
+ * The sparse matrix a is kept in registers.
+ * Call libxsmm_release_kernel in order to deallocate the JIT'ted code.
+ */
+LIBXSMM_API libxsmm_smmfunction libxsmm_create_scsr_reg(const libxsmm_gemm_descriptor* descriptor,
+   const unsigned int* row_ptr, const unsigned int* column_idx, const float* values);
+
+/** Code generation routine for JIT matcopy using a descriptor. */
+LIBXSMM_API libxsmm_xmatcopyfunction libxsmm_xmatcopydispatch(const libxsmm_matcopy_descriptor* descriptor);
+
+/** Code generation routine for JIT transposes using a descriptor */
+LIBXSMM_API libxsmm_xtransfunction libxsmm_xtransdispatch(const libxsmm_transpose_descriptor* descriptor);
 
 /** Deallocates the JIT'ted code as returned by libxsmm_create_* function. TODO: this is a no-op at the moment. */
 LIBXSMM_API void libxsmm_release_kernel(const void* jit_code);
@@ -184,19 +216,6 @@ LIBXSMM_API_INLINE int libxsmm_ditrans(double* inout,
 #else
 { return libxsmm_itrans(inout, sizeof(double), m, n, ld); }
 #endif
-
-/**
- * Utility function, which either prints information about the GEMM call
- * or dumps (FILE/ostream=0) all input and output data into MHD files.
- * The Meta Image Format (MHD) is suitable for visual inspection using e.g.,
- * ITK-SNAP or ParaView.
- */
-LIBXSMM_API void libxsmm_gemm_print(void* ostream,
-  libxsmm_gemm_xflags precision, const char* transa, const char* transb,
-  const libxsmm_blasint* m, const libxsmm_blasint* n, const libxsmm_blasint* k,
-  const void* alpha, const void* a, const libxsmm_blasint* lda,
-  const void* b, const libxsmm_blasint* ldb,
-  const void* beta, void* c, const libxsmm_blasint* ldc);
 
 /** Dispatched general dense matrix multiplication (single-precision); can be called from F77 code. */
 LIBXSMM_API_INLINE void libxsmm_sgemm(const char* transa, const char* transb,

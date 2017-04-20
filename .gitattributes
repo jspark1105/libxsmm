@@ -1,13 +1,16 @@
+.env export-ignore
+.hooks export-ignore
+.analyze.sh export-ignore
+.buildkite.env export-ignore
+.codecov.env export-ignore
+.codefile export-ignore
 .gitattributes export-ignore
 .gitconfig export-ignore
 .gitignore export-ignore
 .scan.sh export-ignore
-.codefile export-ignore
-.codecov.env export-ignore
 .travis.env export-ignore
-.travis.yml export-ignore
 .travis.sh export-ignore
-.hooks export-ignore
+.travis.yml export-ignore
 README.sh export-ignore
 documentation/*.pptx export-ignore
 samples/seissol/*.bound export-ignore
@@ -15,4 +18,6 @@ samples/seissol/*.neigh export-ignore
 samples/seissol/*.orient export-ignore
 samples/seissol/*.sides export-ignore
 samples/seissol/*.size export-ignore
+samples/edge/mats export-ignore
+samples/pyfr/mats export-ignore
 version.txt merge=ours

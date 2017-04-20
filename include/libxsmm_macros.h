@@ -94,10 +94,12 @@
 #define LIBXSMM_API_INLINE LIBXSMM_INTERNAL_API_INLINE LIBXSMM_RETARGETABLE
 
 /* Some definitions kept for compatibility with earlier versions */
-#if !defined(LIBXSMM_EXTERN_C) && defined(__cplusplus)
-# define LIBXSMM_EXTERN_C LIBXSMM_EXTERN
-#else
-# define LIBXSMM_EXTERN_C
+#if !defined(LIBXSMM_EXTERN_C)
+# if defined(__cplusplus)
+#   define LIBXSMM_EXTERN_C LIBXSMM_EXTERN
+# else
+#   define LIBXSMM_EXTERN_C
+# endif
 #endif
 
 #if !defined(LIBXSMM_RESTRICT)
@@ -128,18 +130,22 @@
 #endif
 
 #if defined(__INTEL_COMPILER)
+# define LIBXSMM_ATTRIBUTE_SIMD
 # define LIBXSMM_PRAGMA_SIMD_REDUCTION(EXPRESSION) LIBXSMM_PRAGMA(simd reduction(EXPRESSION))
 # define LIBXSMM_PRAGMA_SIMD_COLLAPSE(N) LIBXSMM_PRAGMA(simd collapse(N))
 # define LIBXSMM_PRAGMA_SIMD_PRIVATE(...) LIBXSMM_PRAGMA(simd private(__VA_ARGS__))
 # define LIBXSMM_PRAGMA_SIMD LIBXSMM_PRAGMA(simd)
 # define LIBXSMM_PRAGMA_NOVECTOR LIBXSMM_PRAGMA(novector)
-#elif defined(_OPENMP) && (201307 <= _OPENMP) /*OpenMP 4.0*/
+#elif (defined(_OPENMP) && (201307 <= _OPENMP)) /*OpenMP 4.0*/ || (defined(LIBXSMM_OPENMP_SIMD) \
+  && LIBXSMM_VERSION3(4, 9, 0) <= LIBXSMM_VERSION3(__GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__))
+# define LIBXSMM_ATTRIBUTE_SIMD LIBXSMM_PRAGMA(optimize("openmp-simd"))
 # define LIBXSMM_PRAGMA_SIMD_REDUCTION(EXPRESSION) LIBXSMM_PRAGMA(omp simd reduction(EXPRESSION))
 # define LIBXSMM_PRAGMA_SIMD_COLLAPSE(N) LIBXSMM_PRAGMA(omp simd collapse(N))
 # define LIBXSMM_PRAGMA_SIMD_PRIVATE(...) LIBXSMM_PRAGMA(omp simd private(__VA_ARGS__))
 # define LIBXSMM_PRAGMA_SIMD LIBXSMM_PRAGMA(omp simd)
 # define LIBXSMM_PRAGMA_NOVECTOR
 #else
+# define LIBXSMM_ATTRIBUTE_SIMD
 # define LIBXSMM_PRAGMA_SIMD_REDUCTION(EXPRESSION)
 # define LIBXSMM_PRAGMA_SIMD_COLLAPSE(N)
 # define LIBXSMM_PRAGMA_SIMD_PRIVATE(...)
@@ -182,16 +188,6 @@
 # define LIBXSMM_OPENMP_COLLAPSE(N)
 #endif
 
-#define LIBXSMM_REPEAT_1(A) A
-#define LIBXSMM_REPEAT_2(A) LIBXSMM_REPEAT_1(A); A
-#define LIBXSMM_REPEAT_3(A) LIBXSMM_REPEAT_2(A); A
-#define LIBXSMM_REPEAT_4(A) LIBXSMM_REPEAT_3(A); A
-#define LIBXSMM_REPEAT_5(A) LIBXSMM_REPEAT_4(A); A
-#define LIBXSMM_REPEAT_6(A) LIBXSMM_REPEAT_5(A); A
-#define LIBXSMM_REPEAT_7(A) LIBXSMM_REPEAT_6(A); A
-#define LIBXSMM_REPEAT_8(A) LIBXSMM_REPEAT_7(A); A
-#define LIBXSMM_REPEAT(N, A) LIBXSMM_CONCATENATE(LIBXSMM_REPEAT_, N)(A)
-
 /*Based on Stackoverflow's NBITSx macro.*/
 #define LIBXSMM_LOG2_02(N) (0 != ((N) & 0x2/*0b10*/) ? 1 : 0)
 #define LIBXSMM_LOG2_04(N) (0 != ((N) & 0xC/*0b1100*/) ? (2 | LIBXSMM_LOG2_02((N) >> 2)) : LIBXSMM_LOG2_02(N))
@@ -210,7 +206,7 @@
 #define LIBXSMM_MUL2(N, NPOT) ((N) << LIBXSMM_LOG2(NPOT))
 #define LIBXSMM_DIV2(N, NPOT) ((N) >> LIBXSMM_LOG2(NPOT))
 #define LIBXSMM_SQRT2(N) (1 << (LIBXSMM_LOG2((N << 1) - 1) >> 1))
-#define LIBXSMM_UP2(N, NPOT) LIBXSMM_MUL2(LIBXSMM_DIV2((N) + (NPOT) - 1, NPOT), NPOT)
+#define LIBXSMM_UP2(N, NPOT) (((N) + ((NPOT) - 1)) & ~((NPOT) - 1))
 #define LIBXSMM_UP(N, UP) ((((N) + (UP) - 1) / (UP)) * (UP))
 /* compares floating point values but avoids warning about unreliable comparison */
 #define LIBXSMM_FEQ(A, B) (!((A) < (B) || (A) > (B)))
@@ -249,11 +245,7 @@
 #   define LIBXSMM_ASSUME(EXPRESSION)
 # endif
 #endif
-#define LIBXSMM_ALIGN_VALUE(N, TYPESIZE, ALIGNMENT/*POT*/) (LIBXSMM_UP2((N) * (TYPESIZE), ALIGNMENT) / (TYPESIZE))
-#define LIBXSMM_ALIGN_VALUE2(N, POTSIZE, ALIGNMENT/*POT*/) LIBXSMM_DIV2(LIBXSMM_UP2(LIBXSMM_MUL2(N, POTSIZE), ALIGNMENT), POTSIZE)
-#define LIBXSMM_ALIGN(POINTER, ALIGNMENT/*POT*/) ((POINTER) + (LIBXSMM_ALIGN_VALUE((uintptr_t)(POINTER), 1, ALIGNMENT) - ((uintptr_t)(POINTER))) / sizeof(*(POINTER)))
-#define LIBXSMM_ALIGN2(POINTPOT, ALIGNMENT/*POT*/) ((POINTPOT) + LIBXSMM_DIV2(LIBXSMM_ALIGN_VALUE2((uintptr_t)(POINTPOT), 1, ALIGNMENT) - ((uintptr_t)(POINTPOT)), sizeof(*(POINTPOT))))
-
+#define LIBXSMM_ALIGN(POINTER, ALIGNMENT/*POT*/) ((POINTER) + (LIBXSMM_UP2((uintptr_t)(POINTER), ALIGNMENT) - ((uintptr_t)(POINTER))) / sizeof(*(POINTER)))
 #define LIBXSMM_HASH_VALUE(N) ((((N) ^ ((N) >> 12)) ^ (((N) ^ ((N) >> 12)) << 25)) ^ ((((N) ^ ((N) >> 12)) ^ (((N) ^ ((N) >> 12)) << 25)) >> 27))
 #define LIBXSMM_HASH2(POINTER, ALIGNMENT/*POT*/, NPOT) LIBXSMM_MOD2(LIBXSMM_HASH_VALUE(LIBXSMM_DIV2((uintptr_t)(POINTER), ALIGNMENT)), NPOT)
 
@@ -270,6 +262,7 @@
 #define LIBXSMM_SELECT_ELEMENT_6(E0, E1, E2, E3, E4, E5, E6, E7) E5
 #define LIBXSMM_SELECT_ELEMENT_7(E0, E1, E2, E3, E4, E5, E6, E7) E6
 #define LIBXSMM_SELECT_ELEMENT_8(E0, E1, E2, E3, E4, E5, E6, E7) E7
+#define LIBXSMM_SELECT_FIRST(A, ...) A
 
 /**
  * For VLAs, check EXACTLY for C99 since a C11-conforming compiler may not provide VLAs.
@@ -303,7 +296,7 @@
 #define LIBXSMM_INDEX1_7(I0, I1, I2, I3, I4, I5, I6, S1, S2, S3, S4, S5, S6) (LIBXSMM_INDEX1_6(I0, I1, I2, I3, I4, I5, S1, S2, S3, S4, S5) * (S6) + (I6))
 #define LIBXSMM_INDEX1_8(I0, I1, I2, I3, I4, I5, I6, I7, S1, S2, S3, S4, S5, S6, S7) (LIBXSMM_INDEX1_7(I0, I1, I2, I3, I4, I5, I6, S1, S2, S3, S4, S5, S6) * (S7) + (I7))
 
- /**
+/**
  * LIBXSMM_VLA_DECL declares an array according to the given set of (multiple) bounds.
  * Syntax: LIBXSMM_VLA_DECL(<ndims>, <elem-type>, <var-name>, <init>, <s1>, ..., <s(ndims-1)>).
  * The element type can be "const" or otherwise qualified; initial value must be (const)element-type*.
@@ -314,19 +307,22 @@
  * Please note that the syntax is similar to LIBXSMM_INDEX1, and the leading dimension (s0) is omitted!
  */
 #if defined(LIBXSMM_VLA)
-# define LIBXSMM_VLA_ACCESS(NDIMS, ARRAY, ...) LIBXSMM_CONCATENATE(LIBXSMM_VLA_ACCESS_, NDIMS)(ARRAY, __VA_ARGS__)
-# define LIBXSMM_VLA_ACCESS_0(ARRAY, ...) (ARRAY)
-# define LIBXSMM_VLA_ACCESS_1(ARRAY, I0, ...) ((ARRAY)[I0])
-# define LIBXSMM_VLA_ACCESS_2(ARRAY, I0, I1, ...) ((ARRAY)[I0][I1])
-# define LIBXSMM_VLA_ACCESS_3(ARRAY, I0, I1, I2, ...) ((ARRAY)[I0][I1][I2])
-# define LIBXSMM_VLA_ACCESS_4(ARRAY, I0, I1, I2, I3, ...) ((ARRAY)[I0][I1][I2][I3])
-# define LIBXSMM_VLA_ACCESS_5(ARRAY, I0, I1, I2, I3, I4, ...) ((ARRAY)[I0][I1][I2][I3][I4])
-# define LIBXSMM_VLA_ACCESS_6(ARRAY, I0, I1, I2, I3, I4, I5, ...) ((ARRAY)[I0][I1][I2][I3][I4][I5])
-# define LIBXSMM_VLA_ACCESS_7(ARRAY, I0, I1, I2, I3, I4, I5, I6, ...) ((ARRAY)[I0][I1][I2][I3][I4][I5][I6])
-# define LIBXSMM_VLA_ACCESS_8(ARRAY, I0, I1, I2, I3, I4, I5, I6, I7, ...) ((ARRAY)[I0][I1][I2][I3][I4][I5][I6][I7])
+# define LIBXSMM_VLA_ACCESS(NDIMS, ARRAY, ...) LIBXSMM_VLA_ACCESS_Z(NDIMS, ARRAY, LIBXSMM_VLA_ACCESS_X, __VA_ARGS__)
+# define LIBXSMM_VLA_ACCESS_X(S) + 0 * (S)
+# define LIBXSMM_VLA_ACCESS_Y(...)
+# define LIBXSMM_VLA_ACCESS_Z(NDIMS, ARRAY, XY, ...) LIBXSMM_CONCATENATE(LIBXSMM_VLA_ACCESS_, NDIMS)(ARRAY, XY, __VA_ARGS__)
+# define LIBXSMM_VLA_ACCESS_0(ARRAY, XY, ...) (ARRAY)/*scalar*/
+# define LIBXSMM_VLA_ACCESS_1(ARRAY, XY, I0, ...) ((ARRAY)[I0])
+# define LIBXSMM_VLA_ACCESS_2(ARRAY, XY, I0, I1, ...) (((ARRAY) XY(__VA_ARGS__))[I0][I1])
+# define LIBXSMM_VLA_ACCESS_3(ARRAY, XY, I0, I1, I2, S1, ...) (((ARRAY) XY(S1) XY(__VA_ARGS__))[I0][I1][I2])
+# define LIBXSMM_VLA_ACCESS_4(ARRAY, XY, I0, I1, I2, I3, S1, S2, ...) (((ARRAY) XY(S1) XY(S2) XY(__VA_ARGS__))[I0][I1][I2][I3])
+# define LIBXSMM_VLA_ACCESS_5(ARRAY, XY, I0, I1, I2, I3, I4, S1, S2, S3, ...) (((ARRAY) XY(S1) XY(S2) XY(S3) XY(__VA_ARGS__))[I0][I1][I2][I3][I4])
+# define LIBXSMM_VLA_ACCESS_6(ARRAY, XY, I0, I1, I2, I3, I4, I5, S1, S2, S3, S4, ...) (((ARRAY) XY(S1) XY(S2) XY(S3) XY(S4) XY(__VA_ARGS__))[I0][I1][I2][I3][I4][I5])
+# define LIBXSMM_VLA_ACCESS_7(ARRAY, XY, I0, I1, I2, I3, I4, I5, I6, S1, S2, S3, S4, S5, ...) (((ARRAY) XY(S1) XY(S2) XY(S3) XY(S4) XY(S5) XY(__VA_ARGS__))[I0][I1][I2][I3][I4][I5][I6])
+# define LIBXSMM_VLA_ACCESS_8(ARRAY, XY, I0, I1, I2, I3, I4, I5, I6, I7, S1, S2, S3, S4, S5, S6, ...) (((ARRAY) XY(S1) XY(S2) XY(S3) XY(S4) XY(S5) XY(S6) XY(__VA_ARGS__))[I0][I1][I2][I3][I4][I5][I6][I7])
 # define LIBXSMM_VLA_DECL(NDIMS, ELEMENT_TYPE, VARIABLE_NAME, INIT_VALUE, .../*bounds*/) \
-    ELEMENT_TYPE LIBXSMM_VLA_ACCESS(LIBXSMM_SELECT_ELEMENT(NDIMS, 0, 1, 2, 3, 4, 5, 6, 7), *LIBXSMM_RESTRICT VARIABLE_NAME, __VA_ARGS__/*bounds*/, __VA_ARGS__/*dummy*/) = \
-   (ELEMENT_TYPE LIBXSMM_VLA_ACCESS(LIBXSMM_SELECT_ELEMENT(NDIMS, 0, 1, 2, 3, 4, 5, 6, 7), *, __VA_ARGS__/*bounds*/, __VA_ARGS__/*dummy*/))(INIT_VALUE)
+    ELEMENT_TYPE LIBXSMM_VLA_ACCESS_Z(LIBXSMM_SELECT_ELEMENT(NDIMS, 0, 1, 2, 3, 4, 5, 6, 7), *LIBXSMM_RESTRICT VARIABLE_NAME, LIBXSMM_VLA_ACCESS_Y, __VA_ARGS__/*bounds*/, __VA_ARGS__/*dummy*/) = \
+   (ELEMENT_TYPE LIBXSMM_VLA_ACCESS_Z(LIBXSMM_SELECT_ELEMENT(NDIMS, 0, 1, 2, 3, 4, 5, 6, 7), *, LIBXSMM_VLA_ACCESS_Y, __VA_ARGS__/*bounds*/, __VA_ARGS__/*dummy*/))(INIT_VALUE)
 #else /* calculate linear index */
 # define LIBXSMM_VLA_ACCESS(NDIMS, ARRAY, ...) ((ARRAY)[LIBXSMM_INDEX1(NDIMS, __VA_ARGS__)])
 # define LIBXSMM_VLA_DECL(NDIMS, ELEMENT_TYPE, VARIABLE_NAME, INIT_VALUE, .../*bounds*/) \
@@ -381,7 +377,7 @@
 # define LIBXSMM_FLOCK(FILE) _lock_file(FILE)
 # define LIBXSMM_FUNLOCK(FILE) _unlock_file(FILE)
 #else
-# if defined(__STDC_VERSION__) && (199901L <= __STDC_VERSION__)
+# if defined(__STDC_VERSION__) && (199901L <= __STDC_VERSION__ || defined(__GNUC__))
 #   define LIBXSMM_SNPRINTF(S, N, ...) snprintf(S, N, __VA_ARGS__)
 # else
 #   define LIBXSMM_SNPRINTF(S, N, ...) sprintf(S, __VA_ARGS__); LIBXSMM_UNUSED(N)
@@ -420,6 +416,11 @@
 #   define __builtin_nans nan
 #   define __builtin_nansf nanf
 # endif
+# if defined(LIBXSMM_BUILD)
+#   if !defined(__STATIC) && !defined(_WINDLL)
+#     define __STATIC
+#   endif
+# endif
 #endif
 #if defined(__GNUC__)
 # if !defined(_GNU_SOURCE)
@@ -453,6 +454,19 @@
 #if defined(LIBXSMM_OFFLOAD_TARGET)
 # pragma offload_attribute(pop)
 #endif
+
+/* Implementation is taken from an anonymous GiHub Gist. */
+LIBXSMM_INLINE LIBXSMM_RETARGETABLE unsigned int libxsmm_icbrt(unsigned long long n) {
+  unsigned long long b; unsigned int y = 0; int s;
+  for (s = 63; s >= 0; s -= 3) {
+    y += y; b = 3 * y * ((unsigned long long)y + 1) + 1;
+    if (b <= (n >> s)) { n -= b << s; ++y; }
+  }
+  return y;
+}
+
+/** Similar to LIBXSMM_UNUSED, this helper "sinks" multiple arguments. */
+LIBXSMM_INLINE LIBXSMM_RETARGETABLE int libxsmm_sink(int rvalue, ...) { return rvalue; }
 
 #endif /*LIBXSMM_MACROS_H*/
 

@@ -33,14 +33,11 @@
 
 #include <libxsmm.h>
 
-#if !defined(LIBXSMM_TRANS_MIN_CHUNKSIZE)
-# define LIBXSMM_TRANS_MIN_CHUNKSIZE 8
+#if !defined(LIBXSMM_TRANS_M)
+# define LIBXSMM_TRANS_M 192
 #endif
-#if !defined(LIBXSMM_TRANS_MAX_CHUNKSIZE)
-# define LIBXSMM_TRANS_MAX_CHUNKSIZE 32
-#endif
-#if !defined(LIBXSMM_TRANS_TYPEOPT)
-# define LIBXSMM_TRANS_TYPEOPT
+#if !defined(LIBXSMM_TRANS_N)
+# define LIBXSMM_TRANS_N LIBXSMM_TRANS_M
 #endif
 
 #define LIBXSMM_OTRANS_KERNEL(TYPE, TYPESIZE, INDEX_I, INDEX_J, OUT, IN, LDI, LDO) \
@@ -59,7 +56,7 @@
 #define LIBXSMM_OTRANS_LOOP(TYPE, TYPESIZE, KERNEL, HINT_ALIGNED, OUT, IN, M0, M1, N0, N1, NCHUNK, LDI, LDO) { \
   const TYPE *const libxsmm_otrans_loop_a_ = (const TYPE*)(IN); \
   TYPE *const libxsmm_otrans_loop_b_ = (TYPE*)(OUT); \
-  libxsmm_blasint libxsmm_otrans_loop_i_, libxsmm_otrans_loop_j_; \
+  unsigned int libxsmm_otrans_loop_i_, libxsmm_otrans_loop_j_; \
   for (libxsmm_otrans_loop_i_ = M0; libxsmm_otrans_loop_i_ < (M1); ++libxsmm_otrans_loop_i_) { \
     LIBXSMM_PRAGMA_NONTEMPORAL HINT_ALIGNED(libxsmm_otrans_loop_b_) \
     for (libxsmm_otrans_loop_j_ = N0; libxsmm_otrans_loop_j_ < ((N0) + (NCHUNK)); ++libxsmm_otrans_loop_j_) { \
@@ -70,104 +67,85 @@
   } \
 }
 
-#define LIBXSMM_OTRANS(TYPE, OUT, IN, M0, M1, N0, N1, N, LDI, LDO) { \
-  if (LIBXSMM_MAX(libxsmm_trans_chunksize, LIBXSMM_TRANS_MIN_CHUNKSIZE) == (N)) { \
-    if (0 == LIBXSMM_MOD2((LDO) * sizeof(TYPE), LIBXSMM_ALIGNMENT) \
-     && 0 == LIBXSMM_MOD2((uintptr_t)(OUT), LIBXSMM_ALIGNMENT)) \
-    { \
-      if (LIBXSMM_TRANS_MAX_CHUNKSIZE == (N)) { \
-        LIBXSMM_OTRANS_LOOP(TYPE, sizeof(TYPE), LIBXSMM_OTRANS_KERNEL, LIBXSMM_PRAGMA_VALIGNED_VARS, \
-          OUT, IN, M0, M1, N0, N1, LIBXSMM_TRANS_MAX_CHUNKSIZE, LDI, LDO); \
-      } \
-      else { \
-        assert(LIBXSMM_TRANS_MIN_CHUNKSIZE == (N)); \
-        LIBXSMM_OTRANS_LOOP(TYPE, sizeof(TYPE), LIBXSMM_OTRANS_KERNEL, LIBXSMM_PRAGMA_VALIGNED_VARS, \
-          OUT, IN, M0, M1, N0, N1, LIBXSMM_TRANS_MIN_CHUNKSIZE, LDI, LDO); \
-      } \
+#define LIBXSMM_OTRANS(TYPE, TYPESIZE, OUT, IN, M0, M1, N0, N1, N, LDI, LDO) { \
+  if (0 == LIBXSMM_MOD2((LDO) * (TYPESIZE), LIBXSMM_ALIGNMENT) \
+   && 0 == LIBXSMM_MOD2((uintptr_t)(OUT), LIBXSMM_ALIGNMENT)) \
+  { \
+    if (LIBXSMM_TRANS_N == (N)) { \
+      LIBXSMM_OTRANS_LOOP(TYPE, TYPESIZE, LIBXSMM_OTRANS_KERNEL, LIBXSMM_PRAGMA_VALIGNED_VARS, \
+        OUT, IN, M0, M1, N0, N1, LIBXSMM_TRANS_N, LDI, LDO); \
     } \
-    else { /* unaligned store */ \
-      if (LIBXSMM_TRANS_MAX_CHUNKSIZE == (N)) { \
-        LIBXSMM_OTRANS_LOOP(TYPE, sizeof(TYPE), LIBXSMM_OTRANS_KERNEL, LIBXSMM_OTRANS_LOOP_UNALIGNED, \
-          OUT, IN, M0, M1, N0, N1, LIBXSMM_TRANS_MAX_CHUNKSIZE, LDI, LDO); \
-      } \
-      else { \
-        assert(LIBXSMM_TRANS_MIN_CHUNKSIZE == (N)); \
-        LIBXSMM_OTRANS_LOOP(TYPE, sizeof(TYPE), LIBXSMM_OTRANS_KERNEL, LIBXSMM_OTRANS_LOOP_UNALIGNED, \
-          OUT, IN, M0, M1, N0, N1, LIBXSMM_TRANS_MIN_CHUNKSIZE, LDI, LDO); \
-      } \
+    else { \
+      LIBXSMM_OTRANS_LOOP(TYPE, TYPESIZE, LIBXSMM_OTRANS_KERNEL, LIBXSMM_PRAGMA_VALIGNED_VARS, \
+        OUT, IN, M0, M1, N0, N1, N, LDI, LDO); \
     } \
   } \
-  else { /* remainder tile */ \
-    LIBXSMM_OTRANS_LOOP(char, sizeof(TYPE), LIBXSMM_OTRANS_KERNEL_GENERIC, LIBXSMM_OTRANS_LOOP_UNALIGNED, \
-      OUT, IN, M0, M1, N0, N1, N, LDI, LDO); \
+  else { /* unaligned store */ \
+    if (LIBXSMM_TRANS_N == (N)) { \
+      LIBXSMM_OTRANS_LOOP(TYPE, TYPESIZE, LIBXSMM_OTRANS_KERNEL, LIBXSMM_OTRANS_LOOP_UNALIGNED, \
+        OUT, IN, M0, M1, N0, N1, LIBXSMM_TRANS_N, LDI, LDO); \
+    } \
+    else { \
+      LIBXSMM_OTRANS_LOOP(TYPE, TYPESIZE, LIBXSMM_OTRANS_KERNEL, LIBXSMM_OTRANS_LOOP_UNALIGNED, \
+        OUT, IN, M0, M1, N0, N1, N, LDI, LDO); \
+    } \
   } \
 }
-
-#if defined(LIBXSMM_TRANS_TYPEOPT)
-# define LIBXSMM_OTRANS_TYPEOPT_BEGIN(OUT, IN, TYPESIZE, M0, M1, N0, N1, N, LDI, LDO) \
-    switch(TYPESIZE) { \
-      case 1: { \
-        LIBXSMM_OTRANS(char, OUT, IN, M0, M1, N0, N1, N, LDI, LDO); \
-      } break; \
-      case 2: { \
-        LIBXSMM_OTRANS(short, OUT, IN, M0, M1, N0, N1, N, LDI, LDO); \
-      } break; \
-      case 4: { \
-        LIBXSMM_OTRANS(float, OUT, IN, M0, M1, N0, N1, N, LDI, LDO); \
-      } break; \
-      case 8: { \
-        LIBXSMM_OTRANS(double, OUT, IN, M0, M1, N0, N1, N, LDI, LDO); \
-      } break; \
-      case 16: { \
-        typedef struct dvec2_t { double value[2]; } dvec2_t; \
-        LIBXSMM_OTRANS(dvec2_t, OUT, IN, M0, M1, N0, N1, N, LDI, LDO); \
-      } break; \
-      default:
-#else
-# define LIBXSMM_OTRANS_TYPEOPT_BEGIN(OUT, IN, TYPESIZE, M0, M1, N0, N1, N, LDI, LDO) {
-#endif
-#define LIBXSMM_OTRANS_TYPEOPT_END }
 
 /**
  * Based on the cache-oblivious transpose by Frigo et.al. with some additional
  * optimization such as using a loop with bounds, which are known at compile-time
  * due to splitting up tiles with one fixed-size extent (chunk).
  */
-#define LIBXSMM_OTRANS_MAIN(KERNEL_START, FN, OUT, IN, TYPESIZE, M0, M1, N0, N1, LDI, LDO) { \
-  /*const*/ libxsmm_blasint libxsmm_otrans_main_m_ = (M1) - (M0), libxsmm_otrans_main_n_ = (N1) - (N0); \
-  if (libxsmm_otrans_main_m_ * libxsmm_otrans_main_n_ * (TYPESIZE) <= ((LIBXSMM_CPU_DCACHESIZE) / 2)) { \
-    KERNEL_START(libxsmm_otrans_main_n_) \
+#define LIBXSMM_OTRANS_MAIN(FN, KERNEL_START, KERNEL, OUT, IN, TYPESIZE, LDI, LDO, TILE_M, TILE_N, M0, M1, N0, N1) { \
+  /*const*/ unsigned int libxsmm_otrans_main_m_ = (M1) - (M0), libxsmm_otrans_main_n_ = (N1) - (N0); \
+  if (libxsmm_otrans_main_m_ <= (TILE_M) && libxsmm_otrans_main_n_ <= (TILE_N)) { \
+    KERNEL_START(firstprivate(libxsmm_otrans_main_m_, libxsmm_otrans_main_n_) untied) \
+    if (0 != (KERNEL) /* check below if the current tile is an inner tile */ \
+      && (TILE_M) == libxsmm_otrans_main_m_ && (TILE_N) == libxsmm_otrans_main_n_) \
     { \
-      LIBXSMM_OTRANS_TYPEOPT_BEGIN(OUT, IN, TYPESIZE, M0, M1, N0, N1, libxsmm_otrans_main_n_, LDI, LDO) \
-      /* fall-back code path, which is generic with respect to the typesize */ \
-      LIBXSMM_OTRANS_LOOP(char, TYPESIZE, LIBXSMM_OTRANS_KERNEL_GENERIC, LIBXSMM_OTRANS_LOOP_UNALIGNED, \
-        OUT, IN, M0, M1, N0, N1, libxsmm_otrans_main_n_, LDI, LDO); \
-      LIBXSMM_OTRANS_TYPEOPT_END \
+      const unsigned int libxsmm_otrans_main_ldi_ = LDI, libxsmm_otrans_main_ldo_ = LDO; \
+      (KERNEL)( /* call the pre-scheduled JIT-kernel */ \
+        ((const char*)(IN)) + (TYPESIZE) * ((N0) * (LDI) + (M0)), &libxsmm_otrans_main_ldi_, \
+        ((char*)(OUT)) + (TYPESIZE) * ((M0) * (LDO) + (N0)), &libxsmm_otrans_main_ldo_); \
+    } \
+    else { \
+      switch(TYPESIZE) { \
+        case 2: { \
+          LIBXSMM_OTRANS(short, 2, OUT, IN, M0, M1, N0, N1, libxsmm_otrans_main_n_, LDI, LDO); \
+        } break; \
+        case 4: { \
+          LIBXSMM_OTRANS(float, 4, OUT, IN, M0, M1, N0, N1, libxsmm_otrans_main_n_, LDI, LDO); \
+        } break; \
+        case 8: { \
+          LIBXSMM_OTRANS(double, 8, OUT, IN, M0, M1, N0, N1, libxsmm_otrans_main_n_, LDI, LDO); \
+        } break; \
+        case 16: { \
+          typedef struct dvec2_t { double value[2]; } dvec2_t; \
+          LIBXSMM_OTRANS(dvec2_t, 16, OUT, IN, M0, M1, N0, N1, libxsmm_otrans_main_n_, LDI, LDO); \
+        } break; \
+        default: { \
+          LIBXSMM_OTRANS(char, TYPESIZE, OUT, IN, M0, M1, N0, N1, libxsmm_otrans_main_n_, LDI, LDO); \
+        } break; \
+      } \
     } \
   } \
   else if (libxsmm_otrans_main_m_ >= libxsmm_otrans_main_n_) { \
-    const libxsmm_blasint libxsmm_otrans_main_mi_ = ((M0) + (M1)) / 2; \
-    (FN)(OUT, IN, TYPESIZE, M0, libxsmm_otrans_main_mi_, N0, N1, LDI, LDO); \
-    (FN)(OUT, IN, TYPESIZE, libxsmm_otrans_main_mi_, M1, N0, N1, LDI, LDO); \
+    const unsigned int libxsmm_otrans_main_mi_ = (TILE_M) < libxsmm_otrans_main_m_ \
+      ? ((M0) + (TILE_M)) : (((M0) + (M1)) / 2); \
+    (FN)(KERNEL, OUT, IN, TYPESIZE, LDI, LDO, TILE_M, TILE_N, M0, libxsmm_otrans_main_mi_, N0, N1); \
+    (FN)(KERNEL, OUT, IN, TYPESIZE, LDI, LDO, TILE_M, TILE_N, libxsmm_otrans_main_mi_, M1, N0, N1); \
   } \
   else { \
-    const int libxsmm_otrans_main_chunksize_ = LIBXSMM_MAX(libxsmm_trans_chunksize, LIBXSMM_TRANS_MIN_CHUNKSIZE); \
-    if (libxsmm_otrans_main_chunksize_ < libxsmm_otrans_main_n_) { \
-      const libxsmm_blasint libxsmm_otrans_main_ni_ = (N0) + libxsmm_otrans_main_chunksize_; \
-      (FN)(OUT, IN, TYPESIZE, M0, M1, N0, libxsmm_otrans_main_ni_, LDI, LDO); \
-      (FN)(OUT, IN, TYPESIZE, M0, M1, libxsmm_otrans_main_ni_, N1, LDI, LDO); \
-    } \
-    else \
-    { \
-      const libxsmm_blasint libxsmm_otrans_main_ni_ = ((N0) + (N1)) / 2; \
-      (FN)(OUT, IN, TYPESIZE, M0, M1, N0, libxsmm_otrans_main_ni_, LDI, LDO); \
-      (FN)(OUT, IN, TYPESIZE, M0, M1, libxsmm_otrans_main_ni_, N1, LDI, LDO); \
-    } \
+    const unsigned int libxsmm_otrans_main_ni_ = (TILE_N) < libxsmm_otrans_main_n_ \
+      ? ((N0) + (TILE_N)) : (((N0) + (N1)) / 2); \
+    (FN)(KERNEL, OUT, IN, TYPESIZE, LDI, LDO, TILE_M, TILE_N, M0, M1, N0, libxsmm_otrans_main_ni_); \
+    (FN)(KERNEL, OUT, IN, TYPESIZE, LDI, LDO, TILE_M, TILE_N, M0, M1, libxsmm_otrans_main_ni_, N1); \
   } \
 }
 
 
-/** Initializes the tranpose functionality; NOT thread-safe. */
+/** Initializes the transpose functionality; NOT thread-safe. */
 LIBXSMM_API void libxsmm_trans_init(int archid);
 
 /** Finalizes the transpose functionality; NOT thread-safe. */
@@ -175,7 +153,7 @@ LIBXSMM_API void libxsmm_trans_finalize(void);
 
 
 /** Size of peeled chunks during transposing inner tiles. */
-LIBXSMM_EXTERN_C LIBXSMM_RETARGETABLE int libxsmm_trans_chunksize;
+LIBXSMM_EXTERN_C LIBXSMM_RETARGETABLE unsigned int libxsmm_trans_tile[2/*DP/SP*/][2/*M,N*/][8/*size-range*/];
 
 #endif /*LIBXSMM_TRANS_H*/
 

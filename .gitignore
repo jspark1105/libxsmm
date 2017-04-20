@@ -1,5 +1,6 @@
 .hooks/.commit
 My Amplifier*
+opentuner.db
 bin/libxsmm_generator
 include/libxsmm_config.h
 include/libxsmm_source.h
@@ -7,14 +8,18 @@ include/libxsmm.f
 include/libxsmm.h
 build/libxsmm_dispatch.h
 build/mm_*_*_*.c
+build/*/*/*.xml
 lib/libxsmm*
 ide/_vs*-*.bat
 ide/*.amplxeproj
+ide/*.advixeproj
 ide/build
 ide/r*ah
+samples2
 tmp
 .state
 .make
+.analyze.log
 codecov-*.txt
 keywords.txt
 notes.txt
@@ -22,6 +27,9 @@ err*.txt
 out*.txt
 log.txt
 _*.txt
+check??????.c
+check??????.f
+*.lastcodeanalysissucceeded
 *.stackdump
 *.opensdf
 *.opendb
@@ -33,8 +41,10 @@ _*.txt
 *.gcno
 *.gcda
 *.gcov
+*.html
 *.iobj
 *.ipdb
+*.URL
 *.log
 *.suo
 *.exe

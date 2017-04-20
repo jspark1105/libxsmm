@@ -28,13 +28,13 @@
 ******************************************************************************/
 /* Alexander Heinecke (Intel Corp.)
 ******************************************************************************/
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "generator_common.h"
 #include "generator_spgemm_csr_reader.h"
+
+#include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+#include <stdio.h>
 
 LIBXSMM_INTERNAL_API_DEFINITION
 void libxsmm_sparse_csr_reader( libxsmm_generated_code* io_generated_code,
@@ -70,7 +70,7 @@ void libxsmm_sparse_csr_reader( libxsmm_generated_code* io_generated_code,
       /* if we are the first line after comment header, we allocate our data structures */
       if ( l_header_read == 0 ) {
         if ( sscanf(l_line, "%u %u %u", o_row_count, o_column_count, o_element_count) == 3 ) {
-          /* allocate CSC datastructue matching mtx file */
+          /* allocate CSC datastructure matching mtx file */
           *o_column_idx = (unsigned int*) malloc(sizeof(unsigned int) * (*o_element_count));
           *o_row_idx = (unsigned int*) malloc(sizeof(unsigned int) * (*o_row_count + 1));
           *o_values = (double*) malloc(sizeof(double) * (*o_element_count));
@@ -80,7 +80,8 @@ void libxsmm_sparse_csr_reader( libxsmm_generated_code* io_generated_code,
           if ( ( *o_row_idx == NULL )      ||
                ( *o_column_idx == NULL )   ||
                ( *o_values == NULL )       ||
-               ( l_row_idx_id == NULL )    ) {
+               ( l_row_idx_id == NULL ) ) {
+            free(*o_row_idx); free(*o_column_idx); free(*o_values); free(l_row_idx_id);
             libxsmm_handle_error( io_generated_code, LIBXSMM_ERR_CSC_ALLOC_DATA );
             return;
           }
@@ -115,11 +116,11 @@ void libxsmm_sparse_csr_reader( libxsmm_generated_code* io_generated_code,
         /* adjust numbers to zero termination */
         l_row--;
         l_column--;
-        /* add these values to row and value strucuture */
+        /* add these values to row and value structure */
         (*o_column_idx)[l_i] = l_column;
         (*o_values)[l_i] = l_value;
         l_i++;
-        /* handle columns, set id to onw for this column, yeah we need to hanle empty columns */
+        /* handle columns, set id to own for this column, yeah we need to handle empty columns */
         l_row_idx_id[l_row] = 1;
         (*o_row_idx)[l_row+1] = l_i;
       }
@@ -129,21 +130,22 @@ void libxsmm_sparse_csr_reader( libxsmm_generated_code* io_generated_code,
   /* close mtx file */
   fclose( l_csr_file_handle );
 
-  /* check if we read a file which was consitent */
+  /* check if we read a file which was consistent */
   if ( l_i != (*o_element_count) ) {
+    free(*o_row_idx); free(*o_column_idx); free(*o_values); free(l_row_idx_id);
     libxsmm_handle_error( io_generated_code, LIBXSMM_ERR_CSR_LEN );
     return;
   }
 
-  /* let's handle empty rows */
-  for ( l_i = 0; l_i < (*o_row_count); l_i++) {
-    if ( l_row_idx_id[l_i] == 0 ) {
-      (*o_row_idx)[l_i+1] = (*o_row_idx)[l_i];
-    }
-  }
-
-  /* free helper data structure */
   if ( l_row_idx_id != NULL ) {
+    /* let's handle empty rows */
+    for ( l_i = 0; l_i < (*o_row_count); l_i++) {
+      if ( l_row_idx_id[l_i] == 0 ) {
+        (*o_row_idx)[l_i+1] = (*o_row_idx)[l_i];
+      }
+    }
+
+    /* free helper data structure */
     free( l_row_idx_id );
   }
 }

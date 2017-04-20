@@ -31,20 +31,25 @@
 #ifndef LIBXSMM_MAIN_H
 #define LIBXSMM_MAIN_H
 
+#include <libxsmm_typedefs.h>
+#include <libxsmm_generator.h>
+#include <libxsmm_malloc.h>
+#include <libxsmm_sync.h>
+#include <libxsmm_dnn.h>
+
 #include <stddef.h>
 #include <stdint.h>
 
-#include <libxsmm_macros.h>
-#include <libxsmm_typedefs.h>
-#include <libxsmm_generator.h>
-#include <libxsmm_dnn.h>
-
 /** Allow external definition to enable testing corner cases (exhausted registry space). */
-#if !defined(LIBXSMM_REGSIZE) /* must be POT */
-# define LIBXSMM_REGSIZE 524288 /* 524287: Mersenne Prime number (2^19-1) */
+#if !defined(LIBXSMM_CAPACITY_REGISTRY) /* must be POT */
+# define LIBXSMM_CAPACITY_REGISTRY 524288 /* 524287: Mersenne Prime number (2^19-1) */
 #endif
-#if !defined(LIBXSMM_CPU_DCACHESIZE)
-# define LIBXSMM_CPU_DCACHESIZE 32768
+
+#if !defined(LIBXSMM_MALLOC_SCRATCH_MAX_NPOOLS)
+# define LIBXSMM_MALLOC_SCRATCH_MAX_NPOOLS 16
+#endif
+#if !defined(LIBXSMM_MALLOC_SCRATCH_SCALE)
+# define LIBXSMM_MALLOC_SCRATCH_SCALE 1.4
 #endif
 
 #if !defined(LIBXSMM_EXT_MIN_NTASKS)
@@ -68,12 +73,18 @@
 #endif
 
 typedef union LIBXSMM_RETARGETABLE libxsmm_code_pointer {
-  /*const*/void* pmm;
-  uintptr_t imm;
+  const void* const_pmm;
+  void* pmm;
+  uintptr_t uimm;
+  intptr_t imm;
+  libxsmm_xmmfunction xmm;
+  libxsmm_smmfunction smm;
+  void (*vmm)(const void* a, const void* b, void* c, ...);
 #if defined(LIBXSMM_BUILD) || defined(LIBXSMM_DNN_INTERNAL_API)
   libxsmm_xconvfunction xconv;
 #endif
-  libxsmm_xmmfunction xmm;
+  libxsmm_xmatcopyfunction xmatcopy;
+  libxsmm_xtransfunction xtrans;
 } libxsmm_code_pointer;
 
 typedef struct LIBXSMM_RETARGETABLE LIBXSMM_MAY_ALIAS libxsmm_csr_soa_descriptor {
@@ -83,6 +94,13 @@ typedef struct LIBXSMM_RETARGETABLE LIBXSMM_MAY_ALIAS libxsmm_csr_soa_descriptor
   const void* values;
 } libxsmm_csr_soa_descriptor;
 
+typedef struct LIBXSMM_RETARGETABLE LIBXSMM_MAY_ALIAS libxsmm_csr_reg_descriptor {
+  const libxsmm_gemm_descriptor* gemm;
+  const unsigned int* row_ptr;
+  const unsigned int* column_idx;
+  const void* values;
+} libxsmm_csr_reg_descriptor;
+
 /** Structure which describes an activation layer. */
 struct LIBXSMM_RETARGETABLE libxsmm_dnn_buffer {
   int N;                            /* number of images in mini-batch */
@@ -91,9 +109,12 @@ struct LIBXSMM_RETARGETABLE libxsmm_dnn_buffer {
   int H;                            /* height of image */
   int W;                            /* width of image */
   int lpb;                          /* low precision blocking factor */
-  libxsmm_dnn_conv_format format;   /* format of activation buffer */
+  int bimg;                         /* size of blocked images */
+  libxsmm_dnn_tensor_format format; /* format of activation buffer */
+  libxsmm_dnn_internal_format custom_format_type;
   libxsmm_dnn_datatype datatype;    /* data type */
   void* data;                       /* pointer to data */
+  char exp;                         /* fix point exponent for this tensor */
 };
 
 /** Structure which describes a bias. */
@@ -103,6 +124,7 @@ struct LIBXSMM_RETARGETABLE libxsmm_dnn_bias {
   int lpb;                          /* low precision blocking factor */
   libxsmm_dnn_datatype datatype;    /* data type */
   void* data;                       /* pointer to data */
+  char exp;                         /* fix point exponent for this tensor */
 };
 
 /** Structure which describes a filter */
@@ -114,20 +136,26 @@ struct LIBXSMM_RETARGETABLE libxsmm_dnn_filter {
   int R;                            /* height of filter kernel */
   int S;                            /* width of filter kernel */
   int lpb;                          /* low precision blocking factor */
-  libxsmm_dnn_conv_format format;   /* format of filter buffer */
+  libxsmm_dnn_tensor_format format; /* format of filter buffer */
+  libxsmm_dnn_internal_format custom_format_type;
   libxsmm_dnn_datatype datatype;    /* data type */
   void* data;                       /* pointer to data */
+  char exp;                         /* fix point exponent for this tensor */
 };
 
-struct LIBXSMM_RETARGETABLE libxsmm_dnn_conv_handle {
-  libxsmm_dnn_datatype datatype_in;
-  libxsmm_dnn_datatype datatype_out;
+struct LIBXSMM_RETARGETABLE libxsmm_dnn_layer {
+  libxsmm_dnn_datatype datatype;
+  libxsmm_dnn_datatype datatype_itm;
   libxsmm_dnn_conv_desc desc;
   libxsmm_dnn_conv_algo algo;
-  libxsmm_dnn_conv_format buffer_format;
-  libxsmm_dnn_conv_format filter_format;
+  libxsmm_dnn_tensor_format buffer_format;
+  libxsmm_dnn_tensor_format filter_format;
   libxsmm_dnn_conv_fuse_op fuse_ops;
   libxsmm_dnn_conv_option options;
+  libxsmm_convolution_winograd_descriptor cwino_fwd;
+  libxsmm_convolution_winograd_descriptor cwino_bwd;
+  libxsmm_convolution_winograd_descriptor cwino_upd;
+  libxsmm_dnn_internal_format custom_format_type;    /* Specifies internal LIBXSMM format to be used */
 
   /* additional size for iternal data types */
   int ifhp;
@@ -151,19 +179,47 @@ struct LIBXSMM_RETARGETABLE libxsmm_dnn_conv_handle {
   int upd_use_thread_fil;
   int upd_use_external_reduce;
   int filter_transposed;
+  int nBImg;
+  int nbImg;
 
   /* internal data representation */
-  libxsmm_dnn_buffer* input;
-  libxsmm_dnn_buffer* output;
-  libxsmm_dnn_buffer* input_relu;
-  libxsmm_dnn_filter* filter;
+  libxsmm_dnn_buffer* reg_input;
+  libxsmm_dnn_buffer* reg_output;
+  libxsmm_dnn_filter* reg_filter;
+  libxsmm_dnn_buffer* grad_input;
+  libxsmm_dnn_buffer* grad_output;
+  libxsmm_dnn_filter* grad_filter;
   libxsmm_dnn_bias* bias;
+
+  /* barrier */
+  libxsmm_barrier* barrier;
+
+  /* scratch */
   void* scratch1;
-  void* scratch2;
-/*#ifdef LIBXSMM_WU_TRANSPOSE_OFW_IFM*/
+  size_t scratch1_size;
   void* scratch3;
-/*#endif*/
+  size_t scratch3_size;
   void* scratch4;
+  size_t scratch4_size;
+  void* scratch5;             /* This scratch is used as a copy buffer when padding needs to be applied */
+  size_t minibatch_scratch_size;
+  size_t fwdbwd_scratch_size;
+  size_t max_scratch5_size;
+  int padding_flag;           /* Flag that dictates if we should apply padding in the input */
+  void* scratch6;
+  size_t scratch6_size;
+  void* scratch7;         /* This scratch is used for low precision intermediate buffer for input in backward pass*/
+  size_t scratch7_size;
+  void* scratchIw;
+  size_t scratchIw_size;
+  void* scratchOw;
+  size_t scratchOw_size;
+  void* scratchVk;
+  size_t scratchVk_size;
+  void* scratchInput;
+  size_t scratchInput_size;
+  void* scratchTemp;
+  int flag_reuseInput;        /* This flag is set to 1 when we want to reuse the input in Winograd domain between forward pass and weight update */
 
   /* JIT-generated convolution code */
   /*
@@ -175,22 +231,58 @@ struct LIBXSMM_RETARGETABLE libxsmm_dnn_conv_handle {
   libxsmm_code_pointer code_fwd[4];
   libxsmm_code_pointer code_bwd[4];
   libxsmm_code_pointer code_upd[6];
+
+  libxsmm_code_pointer matcopy_fwd[1];
+  libxsmm_code_pointer matcopy_bwd[2];
+  libxsmm_code_pointer matcopy_upd[2];
+};
+
+struct LIBXSMM_RETARGETABLE libxsmm_dfsspmdm {
+  int M;
+  int N;
+  int K;
+  int ldb;
+  int ldc;
+  int N_chunksize;
+  double* a_dense;
+  libxsmm_dmmfunction kernel;
+};
+
+struct LIBXSMM_RETARGETABLE libxsmm_sfsspmdm {
+  int M;
+  int N;
+  int K;
+  int ldb;
+  int ldc;
+  int N_chunksize;
+  float* a_dense;
+  libxsmm_smmfunction kernel;
 };
 
 typedef enum libxsmm_build_kind {
   LIBXSMM_BUILD_KIND_GEMM,
   LIBXSMM_BUILD_KIND_SSOA,
+  LIBXSMM_BUILD_KIND_SREG,
   LIBXSMM_BUILD_KIND_CFWD,
   LIBXSMM_BUILD_KIND_CBWD,
-  LIBXSMM_BUILD_KIND_CUPD
+  LIBXSMM_BUILD_KIND_CUPD,
+  LIBXSMM_BUILD_KIND_CWFWD,
+  LIBXSMM_BUILD_KIND_CWBWD,
+  LIBXSMM_BUILD_KIND_CWUPD,
+  LIBXSMM_BUILD_KIND_MCOPY,
+  LIBXSMM_BUILD_KIND_TRANS
 } libxsmm_build_kind;
 
 typedef union LIBXSMM_RETARGETABLE libxsmm_build_descriptor {
   const libxsmm_gemm_descriptor* gemm;
   const libxsmm_csr_soa_descriptor* ssoa;
+  const libxsmm_csr_reg_descriptor* sreg;
   const libxsmm_convolution_forward_descriptor* cfwd;
   const libxsmm_convolution_backward_descriptor* cbwd;
   const libxsmm_convolution_weight_update_descriptor* cupd;
+  const libxsmm_convolution_winograd_descriptor* cwino;
+  const libxsmm_matcopy_descriptor* matcopy;
+  const libxsmm_transpose_descriptor* trans;
 } libxsmm_build_descriptor;
 
 typedef struct LIBXSMM_RETARGETABLE libxsmm_build_request {
@@ -199,14 +291,14 @@ typedef struct LIBXSMM_RETARGETABLE libxsmm_build_request {
 } libxsmm_build_request;
 
 typedef enum libxsmm_malloc_flags {
-  LIBXSMM_MALLOC_FLAG_R = 1,
-  LIBXSMM_MALLOC_FLAG_W = 2,
-  LIBXSMM_MALLOC_FLAG_X = 4,
-  LIBXSMM_MALLOC_FLAG_MMAP = 8,
+  LIBXSMM_MALLOC_FLAG_DEFAULT = 0,
+  LIBXSMM_MALLOC_FLAG_SCRATCH = 1,
+  LIBXSMM_MALLOC_FLAG_MMAP = 2,
+  LIBXSMM_MALLOC_FLAG_R = 4,
+  LIBXSMM_MALLOC_FLAG_W = 8,
+  LIBXSMM_MALLOC_FLAG_X = 16,
   LIBXSMM_MALLOC_FLAG_RW  = LIBXSMM_MALLOC_FLAG_R | LIBXSMM_MALLOC_FLAG_W,
-  LIBXSMM_MALLOC_FLAG_RWX = LIBXSMM_MALLOC_FLAG_RW | LIBXSMM_MALLOC_FLAG_X,
-  /** LIBXSMM_MALLOC_FLAG_DEFAULT is an alias for setting no flag bits. */
-  LIBXSMM_MALLOC_FLAG_DEFAULT = LIBXSMM_MALLOC_FLAG_RW
+  LIBXSMM_MALLOC_FLAG_RWX = LIBXSMM_MALLOC_FLAG_RW | LIBXSMM_MALLOC_FLAG_X
 } libxsmm_malloc_flags;
 
 /** Greatest common divisor. */
@@ -216,14 +308,29 @@ LIBXSMM_API size_t libxsmm_lcm(size_t a, size_t b);
 /** Calculates an alignment depending on supposedly allocated size; alignment can be zero ("auto"). */
 LIBXSMM_API size_t libxsmm_alignment(size_t size, size_t alignment);
 
-/** Receive the size, the flags, or the extra attachment of the given buffer. */
-LIBXSMM_API int libxsmm_malloc_info(const volatile void* memory, size_t* size, int* flags, void** extra);
+/** Same as libxsmm_set_default_allocator, but takes a lock (can be NULL). */
+LIBXSMM_API int libxsmm_xset_default_allocator(LIBXSMM_LOCK_TYPE* lock,
+  void* context, libxsmm_malloc_function malloc_fn, libxsmm_free_function free_fn);
+/** Same as libxsmm_get_default_allocator, but takes a lock (can be NULL). */
+LIBXSMM_API int libxsmm_xget_default_allocator(LIBXSMM_LOCK_TYPE* lock,
+  void** context, libxsmm_malloc_function* malloc_fn, libxsmm_free_function* free_fn);
+
+/** Same as libxsmm_set_scratch_allocator, but takes a lock (can be NULL). */
+LIBXSMM_API int libxsmm_xset_scratch_allocator(LIBXSMM_LOCK_TYPE* lock,
+  void* context, libxsmm_malloc_function malloc_fn, libxsmm_free_function free_fn);
+/** Same as libxsmm_get_scratch_allocator, but takes a lock (can be NULL). */
+LIBXSMM_API int libxsmm_xget_scratch_allocator(LIBXSMM_LOCK_TYPE* lock,
+  void** context, libxsmm_malloc_function* malloc_fn, libxsmm_free_function* free_fn);
+
+/** Retrieve internal information about a buffer (default memory domain). */
+LIBXSMM_API int libxsmm_get_malloc_xinfo(const void* memory, size_t* size, int* flags, void** extra);
 
 /** Allocate memory of the requested size, which is aligned according to the given alignment. */
-LIBXSMM_API int libxsmm_xmalloc(void** memory, size_t size, int alignment, int flags,
+LIBXSMM_API int libxsmm_xmalloc(void** memory, size_t size, size_t alignment, int flags,
   /* The extra information is stored along with the allocated chunk; can be NULL/zero. */
   const void* extra, size_t extra_size);
-LIBXSMM_API int libxsmm_xfree(const volatile void* memory);
+/** Release memory, which was allocated using libxsmm_[*]malloc. */
+LIBXSMM_API int libxsmm_xfree(const void* memory);
 
 /**
  * Attribute memory allocation and protect with only the necessary flags.
@@ -234,8 +341,8 @@ LIBXSMM_API int libxsmm_malloc_attrib(void** memory, int flags,
   /** If a name is given, an executable buffer will be dumped into a file. */
   const char* name);
 
-/** Services a build request, and (optionally) registers the code (use regindex=LIBXSMM_REGSIZE for unmanaged code). */
-LIBXSMM_API void libxsmm_build(const libxsmm_build_request* request, unsigned regindex, libxsmm_code_pointer* code);
+/** Services a build request, and (optionally) registers the code (use regindex=LIBXSMM_CAPACITY_REGISTRY for unmanaged code). */
+LIBXSMM_API int libxsmm_build(const libxsmm_build_request* request, unsigned regindex, libxsmm_code_pointer* code);
 
 /** Updates counters of the statistic, which is shown at program termination. */
 LIBXSMM_API unsigned int libxsmm_update_mmstatistic(int flags, int m, int n, int k, unsigned int ntry, unsigned int ncol);
@@ -243,20 +350,31 @@ LIBXSMM_API unsigned int libxsmm_update_mmstatistic(int flags, int m, int n, int
 LIBXSMM_API int libxsmm_gemm_prefetch2uid(libxsmm_gemm_prefetch_type prefetch);
 LIBXSMM_API libxsmm_gemm_prefetch_type libxsmm_gemm_uid2prefetch(int uid);
 
-LIBXSMM_API size_t libxsmm_dnn_typesize(libxsmm_dnn_datatype datatype);
-
+LIBXSMM_EXTERN_C LIBXSMM_RETARGETABLE LIBXSMM_LOCK_TYPE libxsmm_lock_global;
+/** Function used to allocate default memory. */
+LIBXSMM_EXTERN_C LIBXSMM_RETARGETABLE libxsmm_malloc_function libxsmm_default_malloc_fn;
+/** Function used to allocate scratch memory. */
+LIBXSMM_EXTERN_C LIBXSMM_RETARGETABLE libxsmm_malloc_function libxsmm_scratch_malloc_fn;
+/** Function used to release default memory. */
+LIBXSMM_EXTERN_C LIBXSMM_RETARGETABLE libxsmm_free_function libxsmm_default_free_fn;
+/** Function used to release scratch memory. */
+LIBXSMM_EXTERN_C LIBXSMM_RETARGETABLE libxsmm_free_function libxsmm_scratch_free_fn;
+/** If non-NULL, this context used for the context-form of the malloc/free function. */
+LIBXSMM_EXTERN_C LIBXSMM_RETARGETABLE void* libxsmm_default_allocator_context;
+/** If non-NULL, this context used for the context-form of the malloc/free function. */
+LIBXSMM_EXTERN_C LIBXSMM_RETARGETABLE void* libxsmm_scratch_allocator_context;
+/** Number of scratch memory pools used; clamped against internal maximum. */
+LIBXSMM_EXTERN_C LIBXSMM_RETARGETABLE unsigned int libxsmm_scratch_pools;
+/** Growth factor used to scale the scratch memory in case of reallocation. */
+LIBXSMM_EXTERN_C LIBXSMM_RETARGETABLE double libxsmm_scratch_scale;
 /** Stores the verbosity level (libxsmm_get_verbosity, libxsmm_set_verbosity). */
 LIBXSMM_EXTERN_C LIBXSMM_RETARGETABLE int libxsmm_verbosity;
 /** Target architecture (libxsmm_get_target_archid, libxsmm_set_target_archid). */
 LIBXSMM_EXTERN_C LIBXSMM_RETARGETABLE int libxsmm_target_archid;
-/** Try-lock property of the code registry (0: off, 1: enabled). */
-LIBXSMM_EXTERN_C LIBXSMM_RETARGETABLE int libxsmm_dispatch_trylock;
 /** Determines the prefetch strategy, which is used in case of LIBXSMM_PREFETCH_AUTO. */
 LIBXSMM_EXTERN_C LIBXSMM_RETARGETABLE int libxsmm_gemm_auto_prefetch;
-/** Determines if (OpenMP-)tasks are preferred over thread-style parallelization. */
-LIBXSMM_EXTERN_C LIBXSMM_RETARGETABLE int libxsmm_tasks;
-/** Kind of parallel support (0: none, 1: sequential, 2: parallelized). */
-LIBXSMM_EXTERN_C LIBXSMM_RETARGETABLE int libxsmm_mt;
+/** Determines whether a threaded implementation is synchronized or not. */
+LIBXSMM_EXTERN_C LIBXSMM_RETARGETABLE int libxsmm_sync;
 /** Number of threads per core. */
 LIBXSMM_EXTERN_C LIBXSMM_RETARGETABLE int libxsmm_nt;
 

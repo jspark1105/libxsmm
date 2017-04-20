@@ -26,7 +26,7 @@
 ** NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS        **
 ** SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.              **
 ******************************************************************************/
-/* Alexander Heinecke (Intel Corp.), Hans Pabst (Intel Corp.)
+/* Alexander Heinecke, Hans Pabst (Intel Corp.)
 ******************************************************************************/
 #ifndef LIBXSMM_GENERATOR_H
 #define LIBXSMM_GENERATOR_H
@@ -50,7 +50,7 @@
 #endif
 
 #if defined(LIBXSMM_BIG) && (0 == LIBXSMM_BIG)
-/* TODO: make sure to fallback earlier if index space is exhaused */
+/* TODO: make sure to fallback earlier if index space is exhausted */
 # define LIBXSMM_GEMM_DESCRIPTOR_DIM_TYPE unsigned short
 # define LIBXSMM_GEMM_DESCRIPTOR_DIM_MAX ((LIBXSMM_GEMM_DESCRIPTOR_DIM_TYPE)0xFFFF)
 # define LIBXSMM_GEMM_DESCRIPTOR_SIZE 16 /* LDA,LDB,LDC: 3 * sizeof(LIBXSMM_GEMM_DESCRIPTOR_DIM_TYPE)
@@ -119,21 +119,41 @@ typedef struct libxsmm_gemm_descriptor {
   LIBXSMM_GEMM_DESCRIPTOR_DIM_TYPE lda, ldb, ldc;
   /** Extents of the matrix. */
   LIBXSMM_GEMM_DESCRIPTOR_DIM_TYPE m, n, k;
-  /** Collection of various flags. */
-  unsigned char flags;
   /** Integer value. */
   signed char alpha, beta;
   /** Prefetch strategy enumeration. */
   unsigned char prefetch;
+  /** Collection of various flags. */
+  unsigned char flags;
 } libxsmm_gemm_descriptor;
 
-/** Extended flag set complementing libxsmm_gemm_flags. */
-typedef enum libxsmm_gemm_xflags {
-  /** Not an actual flag; just provided for symmetry. */
-  LIBXSMM_GEMM_FLAG_F64PREC = 0,
-  /** Single-precision (sgemm rather than dgemm). */
-  LIBXSMM_GEMM_FLAG_F32PREC = 16
-} libxsmm_gemm_xflags;
+/** Flag enumeration which can be binary ORed. */
+typedef enum libxsmm_matcopy_flags {
+  /** If set, then use zero matrix as source */
+  LIBXSMM_MATCOPY_FLAG_ZERO_SOURCE = 1
+} libxsmm_matcopy_flags;
+
+/** Structure storing the matcopy argument description. */
+typedef struct libxsmm_matcopy_descriptor {
+  /** M, N, and LDx I/O */
+  unsigned int m, n, ldi, ldo;
+  /** Size of an individual data element */
+  unsigned char typesize;
+  /** Defines the level of unrolling in the copy */
+  unsigned char unroll_level;
+  /** @TODO fix this, non-zero for prefetch */
+  unsigned char prefetch;
+  /** Collection of various flags. */
+  unsigned char flags;
+} libxsmm_matcopy_descriptor;
+
+/** Structure storing the transpose argument description. */
+typedef struct libxsmm_transpose_descriptor {
+  /** M, and N */
+  unsigned int m, n;
+  /** Size of an individual data element */
+  unsigned int typesize;
+} libxsmm_transpose_descriptor;
 
 /** Structure referring to the generated code with some attached information. */
 typedef struct libxsmm_generated_code {
@@ -225,6 +245,17 @@ void libxsmm_generator_spgemm_csr_soa_kernel(libxsmm_generated_code*        io_g
 
 /* @TODO change int based architecture value */
 LIBXSMM_INTERNAL_API
+void libxsmm_generator_matcopy_kernel( libxsmm_generated_code*                      io_generated_code,
+                                       const libxsmm_matcopy_descriptor*            i_matcopy_desc,
+                                       const char*                                  i_arch );
+
+LIBXSMM_INTERNAL_API
+void libxsmm_generator_transpose_kernel( libxsmm_generated_code*                        io_generated_code,
+                                         const libxsmm_transpose_descriptor*            i_trans_desc,
+                                         const char*                                    i_arch );
+
+/* @TODO change int based architecture value */
+LIBXSMM_INTERNAL_API
 void libxsmm_generator_convolution_forward_inlineasm(const char*                       i_file_out,
                                                      const char*                       i_routine_name,
                                                      const libxsmm_convolution_forward_descriptor* i_conv_desc,
@@ -254,6 +285,46 @@ LIBXSMM_INTERNAL_API
 void libxsmm_generator_convolution_weight_update_kernel(libxsmm_generated_code*           io_generated_code,
                                                         const libxsmm_convolution_weight_update_descriptor* i_conv_desc,
                                                         const char*                       i_arch);
+
+/* @TODO change int based architecture value */
+LIBXSMM_INTERNAL_API
+void libxsmm_generator_convolution_winograd_weight_update_kernel(libxsmm_generated_code*                        io_generated_code,
+                                                                 const libxsmm_convolution_winograd_descriptor* i_conv_desc,
+                                                                 const char*                                    i_arch);
+
+/* @TODO change int based architecture value */
+LIBXSMM_INTERNAL_API
+void libxsmm_generator_convolution_winograd_weight_update_inlineasm(const char*                                    i_file_out,
+                                                                    const char*                                    i_routine_name,
+                                                                    const libxsmm_convolution_winograd_descriptor* i_conv_desc,
+                                                                    const char*                                    i_arch);
+
+/* @TODO change int based architecture value */
+LIBXSMM_INTERNAL_API
+void libxsmm_generator_convolution_winograd_weight_update_directasm(const char*                                    i_file_out,
+                                                                    const char*                                    i_routine_name,
+                                                                    const libxsmm_convolution_winograd_descriptor* i_conv_desc,
+                                                                    const char*                                    i_arch);
+
+/* @TODO change int based architecture value */
+LIBXSMM_INTERNAL_API
+void libxsmm_generator_convolution_winograd_forward_kernel(libxsmm_generated_code*                        io_generated_code,
+                                                           const libxsmm_convolution_winograd_descriptor* i_conv_desc,
+                                                           const char*                                    i_arch);
+
+/* @TODO change int based architecture value */
+LIBXSMM_INTERNAL_API
+void libxsmm_generator_convolution_winograd_forward_inlineasm(const char*                                    i_file_out,
+                                                              const char*                                    i_routine_name,
+                                                              const libxsmm_convolution_winograd_descriptor* i_conv_desc,
+                                                              const char*                                    i_arch);
+
+/* @TODO change int based architecture value */
+LIBXSMM_INTERNAL_API
+void libxsmm_generator_convolution_winograd_forward_directasm(const char*                                    i_file_out,
+                                                              const char*                                    i_routine_name,
+                                                              const libxsmm_convolution_winograd_descriptor* i_conv_desc,
+                                                              const char*                                    i_arch);
 
 #endif /*LIBXSMM_GENERATOR_H*/
 
