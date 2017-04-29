@@ -55,7 +55,8 @@ float D2[TDVLEN];
 float D3[TDVLEN];
 
 for (tj = 0; tj < handle->cwino_fwd.jtiles; tj++) {
-  for (ti = 0; ti < handle->cwino_fwd.itiles; ti++) {
+  for (ti = 0; ti < handle->cwino_fwd.itiles; ti++) { /* for each tile */
+    /* copy the current tile to temporary buffer I with shape ALPHA*ALPHA*TDVLEN */
     for (j = 0; j < ALPHA; j++) {
       ydim = tj*(ALPHA - 2) + j - handle->desc.pad_h;
       if ((ydim < 0) || (ydim >= handle->desc.H)) {
@@ -122,7 +123,7 @@ for (tj = 0; tj < handle->cwino_fwd.jtiles; tj++) {
     }
     /* inline code end */
 
-  }
+  } /* for each tile */
 }
 for (j = 0; j < ALPHA; j++) {
   for (i = 0; i < ALPHA; i++) {
