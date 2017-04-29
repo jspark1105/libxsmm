@@ -43,19 +43,8 @@ float t1[TDVLEN];
 float t2[TDVLEN];
 float t3[TDVLEN];
 
-for (j = 0; j < ALPHA; j++) {
-  for (i = 0; i < ALPHA; i++) {
-    for (tj = 0; tj < handle->cwino_fwd.jtiles; tj++) {
-      for (ti = 0; ti < handle->cwino_fwd.itiles; ti++) {
-        LIBXSMM_PRAGMA_SIMD
-        for (k = 0; k < TDVLEN; k++) {
-          LIBXSMM_VLA_ACCESS(4, Ow, tj*handle->cwino_fwd.itiles + ti, j, i, k, ALPHA, ALPHA, TDVLEN) =
-            LIBXSMM_VLA_ACCESS(5, input, j, i, 0, tj*handle->cwino_fwd.itiles + ti, k, ALPHA, handle->blocksofm*handle->cwino_fwd.bimg, total_tiles, TDVLEN);
-        }
-      }
-    }
-  }
-}
+/* input has shape ALPHA*ALPHA*(blocksofm*cwino_fwd.bimg)*total_tiles*TDVLEN */
+/* blocksofm = K/16 ofmblock = 16 */
 for (tj = 0; tj < handle->cwino_fwd.jtiles; tj++) {
   for (ti = 0; ti < handle->cwino_fwd.itiles; ti++) {
     /*trans_O_4x4_3x3(ALPHA-2, TDVLEN, Ow[tj*handle->cwino_fwd.itiles + ti], O);*/
@@ -64,15 +53,15 @@ for (tj = 0; tj < handle->cwino_fwd.jtiles; tj++) {
     for (i = 0; i < 6; i++) {
       LIBXSMM_PRAGMA_SIMD
       for (j = 0; j < TDVLEN; j++) {
-        t0[j] = LIBXSMM_VLA_ACCESS(4, Ow, tj*handle->cwino_fwd.itiles + ti, 1, i, j, ALPHA, ALPHA, TDVLEN) + LIBXSMM_VLA_ACCESS(4, Ow, tj*handle->cwino_fwd.itiles + ti, 2, i, j, ALPHA, ALPHA, TDVLEN);
-        t1[j] = LIBXSMM_VLA_ACCESS(4, Ow, tj*handle->cwino_fwd.itiles + ti, 3, i, j, ALPHA, ALPHA, TDVLEN) + LIBXSMM_VLA_ACCESS(4, Ow, tj*handle->cwino_fwd.itiles + ti, 4, i, j, ALPHA, ALPHA, TDVLEN);
-        t2[j] = LIBXSMM_VLA_ACCESS(4, Ow, tj*handle->cwino_fwd.itiles + ti, 1, i, j, ALPHA, ALPHA, TDVLEN) - LIBXSMM_VLA_ACCESS(4, Ow, tj*handle->cwino_fwd.itiles + ti, 2, i, j, ALPHA, ALPHA, TDVLEN);
-        t3[j] = LIBXSMM_VLA_ACCESS(4, Ow, tj*handle->cwino_fwd.itiles + ti, 3, i, j, ALPHA, ALPHA, TDVLEN) - LIBXSMM_VLA_ACCESS(4, Ow, tj*handle->cwino_fwd.itiles + ti, 4, i, j, ALPHA, ALPHA, TDVLEN);
+        t0[j] = LIBXSMM_VLA_ACCESS(5, input, 1, i, 0, tj*handle->cwino_fwd.itiles + ti, j, ALPHA, handle->blocksofm*handle->cwino_fwd.bimg, total_tiles, TDVLEN) + LIBXSMM_VLA_ACCESS(5, input, 2, i, 0, tj*handle->cwino_fwd.itiles + ti, j, ALPHA, handle->blocksofm*handle->cwino_fwd.bimg, total_tiles, TDVLEN);
+        t1[j] = LIBXSMM_VLA_ACCESS(5, input, 3, i, 0, tj*handle->cwino_fwd.itiles + ti, j, ALPHA, handle->blocksofm*handle->cwino_fwd.bimg, total_tiles, TDVLEN) + LIBXSMM_VLA_ACCESS(5, input, 4, i, 0, tj*handle->cwino_fwd.itiles + ti, j, ALPHA, handle->blocksofm*handle->cwino_fwd.bimg, total_tiles, TDVLEN);
+        t2[j] = LIBXSMM_VLA_ACCESS(5, input, 1, i, 0, tj*handle->cwino_fwd.itiles + ti, j, ALPHA, handle->blocksofm*handle->cwino_fwd.bimg, total_tiles, TDVLEN) - LIBXSMM_VLA_ACCESS(5, input, 2, i, 0, tj*handle->cwino_fwd.itiles + ti, j, ALPHA, handle->blocksofm*handle->cwino_fwd.bimg, total_tiles, TDVLEN);
+        t3[j] = LIBXSMM_VLA_ACCESS(5, input, 3, i, 0, tj*handle->cwino_fwd.itiles + ti, j, ALPHA, handle->blocksofm*handle->cwino_fwd.bimg, total_tiles, TDVLEN) - LIBXSMM_VLA_ACCESS(5, input, 4, i, 0, tj*handle->cwino_fwd.itiles + ti, j, ALPHA, handle->blocksofm*handle->cwino_fwd.bimg, total_tiles, TDVLEN);
 
-        T[0][i][j] = t0[j] + t1[j]     + LIBXSMM_VLA_ACCESS(4, Ow, tj*handle->cwino_fwd.itiles + ti, 0, i, j, ALPHA, ALPHA, TDVLEN);
+        T[0][i][j] = t0[j] + t1[j]     + LIBXSMM_VLA_ACCESS(5, input, 0, i, 0, tj*handle->cwino_fwd.itiles + ti, j, ALPHA, handle->blocksofm*handle->cwino_fwd.bimg, total_tiles, TDVLEN);
         T[1][i][j] = t2[j] + t3[j]*2.f;
         T[2][i][j] = t0[j] + t1[j]*4.f;
-        T[3][i][j] = t2[j] + t3[j]*8.f + LIBXSMM_VLA_ACCESS(4, Ow, tj*handle->cwino_fwd.itiles + ti, 5, i, j, ALPHA, ALPHA, TDVLEN);
+        T[3][i][j] = t2[j] + t3[j]*8.f + LIBXSMM_VLA_ACCESS(5, input, 5, i, 0, tj*handle->cwino_fwd.itiles + ti, j, ALPHA, handle->blocksofm*handle->cwino_fwd.bimg, total_tiles, TDVLEN);
       }
     }
 
@@ -95,14 +84,12 @@ for (tj = 0; tj < handle->cwino_fwd.jtiles; tj++) {
     for (j = 0; j < ALPHA-2; j++) {
       ydim = tj*(ALPHA - 2) + j;
       if (ydim < handle->ofh) {
-        for (i = 0; i < ALPHA-2; i++) {
+        for (i = 0; i < LIBXSMM_MIN(handle->ofw - (int)ti*(ALPHA - 2), ALPHA-2); i++) {
           xdim = ti*(ALPHA - 2) + i;
-          if (xdim < handle->ofw) {
-            LIBXSMM_PRAGMA_SIMD
-            for (k = 0; k < TDVLEN; k++) {
-              LIBXSMM_VLA_ACCESS(4, output, 0, ydim, xdim, k, handle->ofhp, handle->ofwp, TDVLEN) +=
-                O[j][i][k]; /* + bias[0][k]; */
-            }
+          LIBXSMM_PRAGMA_SIMD
+          for (k = 0; k < TDVLEN; k++) {
+            LIBXSMM_VLA_ACCESS(4, output, 0, ydim, xdim, k, handle->ofhp, handle->ofwp, TDVLEN) +=
+              O[j][i][k]; /* + bias[0][k]; */
           }
         }
       }
