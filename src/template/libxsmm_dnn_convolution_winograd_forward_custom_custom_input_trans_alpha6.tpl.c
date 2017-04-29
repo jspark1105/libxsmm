@@ -46,7 +46,8 @@ float t4[TDVLEN];
 float t5[TDVLEN];
 
 for (tj = 0; tj < handle->cwino_fwd.jtiles; tj++) {
-  for (ti = 0; ti < handle->cwino_fwd.itiles; ti++) {
+  for (ti = 0; ti < handle->cwino_fwd.itiles; ti++) { /* for each tile */
+    /* copy the current tile to temporary buffer I with shape ALPHA*ALPHA*TDVLEN */
     for (j = 0; j < ALPHA; j++) {
       ydim = tj*(ALPHA - 2) + j - handle->desc.pad_h;
       if ((ydim < 0) || (ydim >= handle->desc.H)) {
@@ -57,19 +58,23 @@ for (tj = 0; tj < handle->cwino_fwd.jtiles; tj++) {
           }
         }
       } else {
-        for (i = 0; i < ALPHA; i++) {
+        for (i = 0; i < LIBXSMM_MIN(handle->desc.pad_w - (int)ti*(ALPHA - 2), ALPHA); i++) {
+          LIBXSMM_PRAGMA_SIMD
+          for (k = 0; k < TDVLEN; k++) {
+            I[j][i][k] = 0.0f;
+          }
+        }
+        for ( ; i < LIBXSMM_MIN(handle->desc.W + handle->desc.pad_w - (int)ti*(ALPHA - 2), ALPHA); i++) {
           xdim = ti*(ALPHA - 2) + i - handle->desc.pad_w;
-          if ((xdim < 0) || (xdim >= handle->desc.W)) {
-            LIBXSMM_PRAGMA_SIMD
-            for (k = 0; k < TDVLEN; k++) {
-              I[j][i][k] = 0.0f;
-            }
-          } else {
-            LIBXSMM_PRAGMA_SIMD
-            for (k = 0; k < TDVLEN; k++) {
-              I[j][i][k] =
-                LIBXSMM_VLA_ACCESS(4, input, 0, ydim + handle->desc.pad_h_in, xdim + handle->desc.pad_w_in, k, handle->ifhp, handle->ifwp, TDVLEN);
-            }
+          LIBXSMM_PRAGMA_SIMD
+          for (k = 0; k < TDVLEN; k++) {
+            I[j][i][k] =
+              LIBXSMM_VLA_ACCESS(4, input, 0, ydim + handle->desc.pad_h_in, xdim + handle->desc.pad_w_in, k, handle->ifhp, handle->ifwp, TDVLEN);
+          }
+        }
+        for ( ; i < ALPHA; i++) {
+          for (k = 0; k < TDVLEN; k++) {
+            I[j][i][k] = 0.0f;
           }
         }
       }
@@ -110,11 +115,19 @@ for (tj = 0; tj < handle->cwino_fwd.jtiles; tj++) {
         LIBXSMM_VLA_ACCESS(4, Iw, tj*handle->cwino_fwd.itiles + ti, i, 3, j, ALPHA, ALPHA, TDVLEN) = t2[j] + 2.0f*t3[j];
         LIBXSMM_VLA_ACCESS(4, Iw, tj*handle->cwino_fwd.itiles + ti, i, 4, j, ALPHA, ALPHA, TDVLEN) = t2[j] - 2.0f*t3[j];
         LIBXSMM_VLA_ACCESS(4, Iw, tj*handle->cwino_fwd.itiles + ti, i, 5, j, ALPHA, ALPHA, TDVLEN) = t5[j] + 4.0f*T[i][1][j];
+
+        /*LIBXSMM_VLA_ACCESS(5, output, i, 0, 0, tj*handle->cwino_fwd.itiles + ti, j, ALPHA, handle->blocksifm*handle->cwino_fwd.bimg, total_tiles, TDVLEN) = t4[j] + 4.0f*T[i][0][j];
+        LIBXSMM_VLA_ACCESS(5, output, i, 1, 0, tj*handle->cwino_fwd.itiles + ti, j, ALPHA, handle->blocksifm*handle->cwino_fwd.bimg, total_tiles, TDVLEN) = t0[j] + t1[j];
+        LIBXSMM_VLA_ACCESS(5, output, i, 2, 0, tj*handle->cwino_fwd.itiles + ti, j, ALPHA, handle->blocksifm*handle->cwino_fwd.bimg, total_tiles, TDVLEN) = t0[j] - t1[j];
+        LIBXSMM_VLA_ACCESS(5, output, i, 3, 0, tj*handle->cwino_fwd.itiles + ti, j, ALPHA, handle->blocksifm*handle->cwino_fwd.bimg, total_tiles, TDVLEN) = t2[j] + 2.0f*t3[j];
+        LIBXSMM_VLA_ACCESS(5, output, i, 4, 0, tj*handle->cwino_fwd.itiles + ti, j, ALPHA, handle->blocksifm*handle->cwino_fwd.bimg, total_tiles, TDVLEN) = t2[j] - 2.0f*t3[j];
+        LIBXSMM_VLA_ACCESS(5, output, i, 5, 0, tj*handle->cwino_fwd.itiles + ti, j, ALPHA, handle->blocksifm*handle->cwino_fwd.bimg, total_tiles, TDVLEN) = t5[j] + 4.0f*T[i][1][j];*/
       }
     }
     /* inline code end */
+    /* temporal buffer Iw has shape total_tiles*ALPHA*ALPHA*TDVLEN */
 
-  }
+  } /* for each tile */
 }
 for (j = 0; j < ALPHA; j++) {
   for (i = 0; i < ALPHA; i++) {
@@ -129,4 +142,5 @@ for (j = 0; j < ALPHA; j++) {
     }
   }
 }
-
+/* output buffer has shape ALPHA*ALPHA*(blocksifm*cwino_fwd.bimg)*total_tiles*TDVLEN */
+/* blocksifm = C/16 ifmblock = 16 */
