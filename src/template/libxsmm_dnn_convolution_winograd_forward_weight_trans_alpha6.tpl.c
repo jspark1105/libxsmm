@@ -106,4 +106,4 @@ for (j = 0; j < ALPHA; j++) {
     }
   }
 }
-
+/* output has shape ALPHA*ALPHA*(blocksifm*blocksofm)*TDVLEN*TDVLEN */
