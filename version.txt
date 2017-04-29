@@ -1,1 +1,1 @@
-master-1.8-77
+sparse-cnn-1.8-78
