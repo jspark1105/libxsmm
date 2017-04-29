@@ -170,7 +170,11 @@ typedef enum libxsmm_dnn_conv_algo {
   /** direct convolution. */
   LIBXSMM_DNN_CONV_ALGO_DIRECT,
   /** winograd convolution. */
-  LIBXSMM_DNN_CONV_ALGO_WINOGRAD
+  LIBXSMM_DNN_CONV_ALGO_WINOGRAD,
+  /** sparse convolution. */
+  LIBXSMM_DNN_CONV_ALGO_SPARSE,
+  /** sparse winograd convolution. */
+  LIBXSMM_DNN_CONV_ALGO_SPARSE_WINOGRAD,
 } libxsmm_dnn_conv_algo;
 
 /** Structure which describes the input and output of data (DNN). */
@@ -267,6 +271,8 @@ LIBXSMM_API libxsmm_dnn_err_t libxsmm_dnn_release_filter(libxsmm_dnn_layer* hand
 /** Run the layer identified by the handle; may use threads internally. */
 LIBXSMM_API void libxsmm_dnn_execute(libxsmm_dnn_layer* handle, libxsmm_dnn_compute_kind kind);
 LIBXSMM_API libxsmm_dnn_err_t libxsmm_dnn_execute_st(libxsmm_dnn_layer* handle, libxsmm_dnn_compute_kind kind,
+  /*unsigned*/int start_thread, /*unsigned*/int tid);
+LIBXSMM_API libxsmm_dnn_err_t libxsmm_dnn_execute_st_noweighttrans(libxsmm_dnn_layer* handle, libxsmm_dnn_compute_kind kind,
   /*unsigned*/int start_thread, /*unsigned*/int tid);
 
 /** some helper functions for framework integration */

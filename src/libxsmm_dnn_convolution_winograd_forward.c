@@ -238,6 +238,68 @@ LIBXSMM_API_DEFINITION libxsmm_dnn_err_t libxsmm_dnn_convolve_winograd_st_fwd_cu
   return status;
 }
 
+LIBXSMM_API_DEFINITION libxsmm_dnn_err_t libxsmm_dnn_convolve_winograd_st_fwd_custom_custom_noweighttrans( libxsmm_dnn_layer* handle, int start_thread, int tid )
+{
+  libxsmm_dnn_err_t status = LIBXSMM_DNN_SUCCESS;
+
+  /* check if we have input, output and filter */
+  if (handle->reg_input == 0 || handle->reg_output == 0 || handle->reg_filter == 0 || handle->scratch1 == 0 || handle->scratch3 == 0 || handle->scratch4 == 0 || handle->scratchIw == 0 || handle->scratchOw == 0) {
+    status = LIBXSMM_DNN_ERR_DATA_NOT_BOUND;
+    return status;
+  }
+
+  /* check if we have a kernel JITed */
+  if (handle->code_fwd[0].xconv.sconv == 0) {
+    if (handle->datatype == LIBXSMM_DNN_DATATYPE_F32 && handle->datatype_itm == LIBXSMM_DNN_DATATYPE_F32) {
+      //typedef float element_input_type;
+      //typedef float element_output_type;
+      //typedef float element_filter_type;
+//# include "template/libxsmm_dnn_convolve_st_fwd_custom_custom_fallback.tpl.c"
+      status = LIBXSMM_DNN_ERR_UNSUPPORTED_DATATYPE;
+      return status;
+    } else {
+      status = LIBXSMM_DNN_ERR_UNSUPPORTED_DATATYPE;
+      return status;
+    }
+  }
+  else {
+    if (handle->datatype == LIBXSMM_DNN_DATATYPE_F32 && handle->datatype_itm == LIBXSMM_DNN_DATATYPE_F32) {
+#if 0
+      typedef float element_input_type;
+      typedef float element_output_type;
+      typedef float element_filter_type;
+      typedef libxsmm_sconvfunction libxsmm_convfunction;
+# include "template/libxsmm_dnn_convolve_winograd_st_fwd_custom_custom.tpl.c"
+#endif
+
+      if (handle->cwino_fwd.alpha == 6) {
+#define ALPHA 6
+#define TDVLEN 16
+# include "template/libxsmm_dnn_convolution_winograd_forward_custom_custom_noweighttrans_inlined.tpl.c"
+#undef TDVLEN
+#undef ALPHA
+      //} else if (handle->cwino_fwd.alpha == 4) {
+//#define ALPHA 4
+//#define TDVLEN 16
+//# include "template/libxsmm_dnn_convolution_winograd_forward_custom_custom_inlined.tpl.c"
+//#undef TDVLEN
+//#undef ALPHA
+      }
+#if !defined(NDEBUG)
+      else {
+        fprintf(stderr, "LIBXSMM error: Unsupported alpha %u\n", handle->cwino_fwd.alpha);
+        assert(0);
+      }
+#endif
+    } else {
+      status = LIBXSMM_DNN_ERR_UNSUPPORTED_DATATYPE;
+      return status;
+    }
+  }
+
+  return status;
+}
+
 LIBXSMM_API_DEFINITION libxsmm_dnn_err_t libxsmm_dnn_convolve_winograd_st_fwd_nhwc_custom( libxsmm_dnn_layer* handle, int start_thread, int tid )
 {
   libxsmm_dnn_err_t status = LIBXSMM_DNN_SUCCESS;

@@ -253,8 +253,7 @@ LIBXSMM_API_DEFINITION libxsmm_dnn_layer* libxsmm_dnn_create_conv_layer(
       *status = libxsmm_dnn_internal_create_conv_handle_winograd_check( handle );
       if ( *status == LIBXSMM_DNN_WARN_FALLBACK ) handle->algo = LIBXSMM_DNN_CONV_ALGO_DIRECT;
     }
-
-    if ( handle->algo == LIBXSMM_DNN_CONV_ALGO_DIRECT ) {
+    else if ( handle->algo == LIBXSMM_DNN_CONV_ALGO_DIRECT ) {
       *status = libxsmm_dnn_internal_create_conv_handle_direct( handle );
     } else {
       assert(0/*should not happen*/);
@@ -1884,11 +1883,222 @@ LIBXSMM_INLINE LIBXSMM_RETARGETABLE libxsmm_dnn_err_t internal_execute_st(libxsm
   return status;
 }
 
+LIBXSMM_INLINE LIBXSMM_RETARGETABLE libxsmm_dnn_err_t internal_execute_st_noweighttrans(libxsmm_dnn_layer* handle,
+  libxsmm_dnn_compute_kind kind, int start_thread, int tid)
+{
+  libxsmm_dnn_err_t status = LIBXSMM_DNN_SUCCESS;
+
+  if (0 != handle) {
+    switch (handle->algo) {
+      case LIBXSMM_DNN_CONV_ALGO_DIRECT: {
+        switch (kind) {
+          case LIBXSMM_DNN_COMPUTE_KIND_FWD: {
+            switch (handle->buffer_format) {
+              case LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM: {
+                switch (handle->filter_format) {
+                  case LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM: {
+                    status = libxsmm_dnn_convolve_st_fwd_custom_custom(handle, start_thread, tid);
+                  } break;
+                  default: {
+                    status = LIBXSMM_DNN_ERR_INVALID_FORMAT_CONVOLVE;
+                  }
+                }
+              } break;
+              case LIBXSMM_DNN_TENSOR_FORMAT_NHWC: {
+                switch (handle->filter_format) {
+                  case LIBXSMM_DNN_TENSOR_FORMAT_RSCK: {
+                    status = libxsmm_dnn_convolve_st_fwd_nhwc_rsck(handle, start_thread, tid);
+                  } break;
+                  case LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM: {
+                    status = libxsmm_dnn_convolve_st_fwd_nhwc_custom(handle, start_thread, tid);
+                  } break;
+                  default: {
+                    status = LIBXSMM_DNN_ERR_INVALID_FORMAT_CONVOLVE;
+                  }
+                }
+              } break;
+              default: {
+                status = LIBXSMM_DNN_ERR_INVALID_FORMAT_CONVOLVE;
+              }
+            }
+          } break;
+          case LIBXSMM_DNN_COMPUTE_KIND_BWD: {
+            switch (handle->buffer_format) {
+              case LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM: {
+                switch (handle->filter_format) {
+                  case LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM: {
+                    status = libxsmm_dnn_convolve_st_bwd_custom_custom(handle, start_thread, tid);
+                  } break;
+                  default: {
+                    status = LIBXSMM_DNN_ERR_INVALID_FORMAT_CONVOLVE;
+                  }
+                }
+              } break;
+              case LIBXSMM_DNN_TENSOR_FORMAT_NHWC: {
+                switch (handle->filter_format) {
+                  case LIBXSMM_DNN_TENSOR_FORMAT_RSCK: {
+                    status = libxsmm_dnn_convolve_st_bwd_nhwc_rsck(handle, start_thread, tid);
+                  } break;
+                  case LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM: {
+                    status = libxsmm_dnn_convolve_st_bwd_nhwc_custom(handle, start_thread, tid);
+                  } break;
+                  default: {
+                    status = LIBXSMM_DNN_ERR_INVALID_FORMAT_CONVOLVE;
+                  }
+                }
+              } break;
+              default: {
+                status = LIBXSMM_DNN_ERR_INVALID_FORMAT_CONVOLVE;
+              }
+            }
+          } break;
+          case LIBXSMM_DNN_COMPUTE_KIND_UPD: {
+            switch (handle->buffer_format) {
+              case LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM: {
+                 switch (handle->filter_format) {
+                  case LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM: {
+                    status = libxsmm_dnn_convolve_st_upd_custom_custom(handle, start_thread, tid);
+                  } break;
+                  default: {
+                    status = LIBXSMM_DNN_ERR_INVALID_FORMAT_CONVOLVE;
+                  }
+                }
+              } break;
+              case LIBXSMM_DNN_TENSOR_FORMAT_NHWC: {
+                switch (handle->filter_format) {
+                  case LIBXSMM_DNN_TENSOR_FORMAT_RSCK: {
+                    status = libxsmm_dnn_convolve_st_upd_nhwc_rsck(handle, start_thread, tid);
+                  } break;
+                  case LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM: {
+                    status = libxsmm_dnn_convolve_st_upd_nhwc_custom(handle, start_thread, tid);
+                  } break;
+                  default: {
+                    status = LIBXSMM_DNN_ERR_INVALID_FORMAT_CONVOLVE;
+                  }
+                }
+              } break;
+              default: {
+                status = LIBXSMM_DNN_ERR_INVALID_FORMAT_CONVOLVE;
+              }
+            }
+          } break;
+          default: {
+            status = LIBXSMM_DNN_ERR_INVALID_KIND;
+          }
+        }
+      } break;
+      case LIBXSMM_DNN_CONV_ALGO_WINOGRAD: {
+        switch (kind) {
+          case LIBXSMM_DNN_COMPUTE_KIND_FWD: {
+            switch (handle->buffer_format) {
+              case LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM: {
+                switch (handle->filter_format) {
+                  case LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM: {
+                    status = libxsmm_dnn_convolve_winograd_st_fwd_custom_custom_noweighttrans(handle, start_thread, tid);
+                  } break;
+                  default: {
+                    status = LIBXSMM_DNN_ERR_INVALID_FORMAT_CONVOLVE;
+                  }
+                }
+              } break;
+              case LIBXSMM_DNN_TENSOR_FORMAT_NHWC: {
+                switch (handle->filter_format) {
+                  case LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM: {
+                    status = libxsmm_dnn_convolve_winograd_st_fwd_nhwc_custom(handle, start_thread, tid);
+                  } break;
+                  default: {
+                    status = LIBXSMM_DNN_ERR_INVALID_FORMAT_CONVOLVE;
+                  }
+                }
+              } break;
+              default: {
+                status = LIBXSMM_DNN_ERR_INVALID_FORMAT_CONVOLVE;
+              }
+            }
+          } break;
+          case LIBXSMM_DNN_COMPUTE_KIND_BWD: {
+            switch (handle->buffer_format) {
+              case LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM: {
+                switch (handle->filter_format) {
+                  case LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM: {
+                    status = libxsmm_dnn_convolve_winograd_st_bwd_custom_custom(handle, start_thread, tid);
+                  } break;
+                  default: {
+                    status = LIBXSMM_DNN_ERR_INVALID_FORMAT_CONVOLVE;
+                  }
+                }
+              } break;
+              case LIBXSMM_DNN_TENSOR_FORMAT_NHWC: {
+                switch (handle->filter_format) {
+                  case LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM: {
+                    status = libxsmm_dnn_convolve_winograd_st_bwd_nhwc_custom(handle, start_thread, tid);
+                  } break;
+                  default: {
+                    status = LIBXSMM_DNN_ERR_INVALID_FORMAT_CONVOLVE;
+                  }
+                }
+              } break;
+              default: {
+                status = LIBXSMM_DNN_ERR_INVALID_FORMAT_CONVOLVE;
+              }
+            }
+          } break;
+          case LIBXSMM_DNN_COMPUTE_KIND_UPD: {
+            switch (handle->buffer_format) {
+              case LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM: {
+                 switch (handle->filter_format) {
+                  case LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM: {
+                    status = libxsmm_dnn_convolve_winograd_st_upd_custom_custom(handle, start_thread, tid);
+                  } break;
+                  default: {
+                    status = LIBXSMM_DNN_ERR_INVALID_FORMAT_CONVOLVE;
+                  }
+                }
+              } break;
+              case LIBXSMM_DNN_TENSOR_FORMAT_NHWC: {
+                 switch (handle->filter_format) {
+                  case LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM: {
+                    status = libxsmm_dnn_convolve_winograd_st_upd_nhwc_custom(handle, start_thread, tid);
+                  } break;
+                  default: {
+                    status = LIBXSMM_DNN_ERR_INVALID_FORMAT_CONVOLVE;
+                  }
+                }
+              } break;
+              default: {
+                status = LIBXSMM_DNN_ERR_INVALID_FORMAT_CONVOLVE;
+              }
+            }
+          } break;
+          default: {
+            status = LIBXSMM_DNN_ERR_INVALID_KIND;
+          }
+        }
+      } break;
+      default: {
+        status = LIBXSMM_DNN_ERR_INVALID_ALGO;
+      }
+    }
+  }
+  else {
+    status = LIBXSMM_DNN_ERR_INVALID_HANDLE;
+  }
+
+  return status;
+}
+
 
 LIBXSMM_API_DEFINITION libxsmm_dnn_err_t libxsmm_dnn_execute_st(libxsmm_dnn_layer* handle,
   libxsmm_dnn_compute_kind kind, /*unsigned*/int start_thread, /*unsigned*/int tid)
 {
   return internal_execute_st(handle, kind, start_thread, tid);
+}
+
+
+LIBXSMM_API_DEFINITION libxsmm_dnn_err_t libxsmm_dnn_execute_st_noweighttrans(libxsmm_dnn_layer* handle,
+  libxsmm_dnn_compute_kind kind, /*unsigned*/int start_thread, /*unsigned*/int tid)
+{
+  return internal_execute_st_noweighttrans(handle, kind, start_thread, tid);
 }
 
 
