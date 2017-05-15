@@ -528,7 +528,7 @@ LIBXSMM_INLINE void naive_conv_winograd_fp(naive_conv_t* param, const float* inp
   libxsmm_free(M_buffer);
 }
 
-LIBXSMM_INLINE void naive_conv_sparse_winograd_fp(naive_conv_t* param, const float* input, float* output, const int *filter_rowptr, const int *filter_colidx, const float* filter_values)
+LIBXSMM_INLINE void naive_conv_sparse_winograd_fp(naive_conv_t* param, const float* input, float* output, const int *filter_rowptr, const unsigned char *filter_colidx, const float* filter_values)
 {
   int nImg      = param->nImg;
   int nIfm      = param->nIfm;
@@ -1045,7 +1045,8 @@ int main(int argc, char* argv[])
   output_libxsmm        = (float*)libxsmm_aligned_malloc( nImg*nOfm*ofhp*ofwp*sizeof(float), 2097152);
 
   float *sparse_values = NULL;
-  int *sparse_rowptr = NULL, *sparse_colidx = NULL;
+  int *sparse_rowptr = NULL;
+  unsigned char *sparse_colidx = NULL;
   if (sparse_filter_file) {
 
     FILE *fp = fopen(sparse_filter_file, "r");
@@ -1091,7 +1092,7 @@ int main(int argc, char* argv[])
     int num_sparse_rows = alpha*alpha*nOfm;
     sparse_rowptr = (int *)libxsmm_aligned_malloc((num_sparse_rows + 1)*sizeof(int), 2097152);
     memset(sparse_rowptr, 0, sizeof(float)*(num_sparse_rows + 1));
-    sparse_colidx = (int *)libxsmm_aligned_malloc(nnz*sizeof(int), 2097152);
+    sparse_colidx = (unsigned char *)libxsmm_aligned_malloc(nnz*sizeof(unsigned char), 2097152);
     sparse_values = (float *)libxsmm_aligned_malloc(nnz*sizeof(float), 2097152);
 
     int i, j;
@@ -1108,7 +1109,8 @@ int main(int argc, char* argv[])
       int alphaj = i, alphai = j/nOfm/nIfm, ofm = j/nIfm%nOfm, ifm = j%nIfm;
       naive_filter[((alphaj*alpha + alphai)*nOfm + ofm)*nIfm + ifm] = re;
 
-      int sparse_row = (alphaj*alpha + alphai)*nOfm + ofm;
+      int sparse_row = (ofm*alpha + alphaj)*alpha + alphai;
+//      int sparse_row = (alphaj*alpha + alphai)*nOfm + ofm;
       int sparse_col = ifm;
 
       ++sparse_rowptr[sparse_row + 1]; // count nnz per row
@@ -1124,12 +1126,15 @@ int main(int argc, char* argv[])
     memset(nnz_per_row, 0, num_sparse_rows*sizeof(int));
 
     for (i = 0; i < num_sparse_rows; ++i) {
+      int ofm = i%nOfm, alphai = i/nOfm%alpha, alphaj = i/nOfm/alpha;
+      int sparse_row = (ofm*alpha + alphaj)*alpha + alphai;
+
       for (j = 0; j < nIfm; ++j) {
         float f = naive_filter[i*nIfm + j];
         if (f != 0.f) {
-          sparse_colidx[sparse_rowptr[i] + nnz_per_row[i]] = j;
-          sparse_values[sparse_rowptr[i] + nnz_per_row[i]] = f;
-          ++nnz_per_row[i];
+          sparse_colidx[sparse_rowptr[sparse_row] + nnz_per_row[sparse_row]] = j;
+          sparse_values[sparse_rowptr[sparse_row] + nnz_per_row[sparse_row]] = f;
+          ++nnz_per_row[sparse_row];
         }
       }
     }
@@ -1352,6 +1357,8 @@ int main(int argc, char* argv[])
 #else
         const int tid = 0;
 #endif
+        libxsmm_barrier_init((libxsmm_barrier*)libxsmm_handle->barrier, tid);
+
         CHKERR_LIBXSMM_DNN( libxsmm_dnn_execute_st_sparse( libxsmm_handle, LIBXSMM_DNN_COMPUTE_KIND_FWD, 0, tid ) );
       }
 
@@ -1476,17 +1483,20 @@ int main(int argc, char* argv[])
       printf("##########################################\n");
       /* run LIBXSMM convolution for performance */
       l_start = libxsmm_timer_tick();
-      for (i = 0; i < iters; ++i) {
 #if defined(_OPENMP)
 #   pragma omp parallel
 #endif
-        {
+      {
 #if defined(_OPENMP)
-          const int tid = omp_get_thread_num();
+        const int tid = omp_get_thread_num();
 #else
-          const int tid = 0;
+        const int tid = 0;
 #endif
+
+        int i;
+        for (i = 0; i < iters; ++i) {
           libxsmm_dnn_execute_st_sparse( libxsmm_handle, LIBXSMM_DNN_COMPUTE_KIND_FWD, 0, tid );
+          libxsmm_barrier_wait((libxsmm_barrier*)libxsmm_handle->barrier, tid);
         }
       }
       l_end = libxsmm_timer_tick();

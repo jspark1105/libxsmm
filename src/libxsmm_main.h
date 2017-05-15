@@ -222,7 +222,7 @@ struct LIBXSMM_RETARGETABLE libxsmm_dnn_layer {
   int flag_reuseInput;        /* This flag is set to 1 when we want to reuse the input in Winograd domain between forward pass and weight update */
 
   int *sparse_filter_rowptr;
-  int *sparse_filter_colidx;
+  unsigned char *sparse_filter_colidx;
   float *sparse_filter_values;
 
   /* JIT-generated convolution code */

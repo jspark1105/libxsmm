@@ -274,6 +274,8 @@ LIBXSMM_API libxsmm_dnn_err_t libxsmm_dnn_execute_st(libxsmm_dnn_layer* handle, 
   /*unsigned*/int start_thread, /*unsigned*/int tid);
 LIBXSMM_API libxsmm_dnn_err_t libxsmm_dnn_execute_st_noweighttrans(libxsmm_dnn_layer* handle, libxsmm_dnn_compute_kind kind,
   /*unsigned*/int start_thread, /*unsigned*/int tid);
+LIBXSMM_API libxsmm_dnn_err_t libxsmm_dnn_execute_st_sparse(libxsmm_dnn_layer* handle, libxsmm_dnn_compute_kind kind,
+  /*unsigned*/int start_thread, /*unsigned*/int tid);
 
 /** some helper functions for framework integration */
 LIBXSMM_API libxsmm_dnn_err_t libxsmm_dnn_transpose_filter(libxsmm_dnn_layer* handle, const libxsmm_dnn_filter_type type);

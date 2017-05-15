@@ -1305,7 +1305,7 @@ LIBXSMM_API_DEFINITION libxsmm_dnn_err_t libxsmm_dnn_internal_create_conv_handle
       /* General scenario */
       else {
         if ((handle->desc.N % 4) == 0) {
-          wino_desc_fp.bimg = 4;
+          wino_desc_fp.bimg = 1;//4;
         } else if ((handle->desc.N % 2) == 0) {
           wino_desc_fp.bimg = 2;
         } else {
