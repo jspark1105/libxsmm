@@ -32,6 +32,11 @@ SYM = 1
 # include common Makefile artifacts
 include $(DEPDIR)/Makefile.inc
 
+ifeq (1,$(SEP))
+  #CFLAGS += -I$(HOME)/work/sep_4.1_knl04/include -DSEP
+  LDFLAGS += -L$(HOME)/work/sep_4.1_knl04/lib64 -lprog_api -lsampling_utils -lamplxe_lua_5.3 -lamplxe_libxml_2.7
+endif
+
 OUTNAME := $(shell basename $(ROOTDIR))
 HEADERS := $(wildcard $(INCDIR)/*.h) $(wildcard $(INCDIR)/*.hpp) $(wildcard $(INCDIR)/*.hxx) $(wildcard $(INCDIR)/*.hh) \
            $(wildcard $(SRCDIR)/*.h) $(wildcard $(SRCDIR)/*.hpp) $(wildcard $(SRCDIR)/*.hxx) $(wildcard $(SRCDIR)/*.hh)
@@ -63,8 +68,8 @@ all: $(XFILES)
 .PHONY: compile
 compile: $(OBJECTS) $(FTNOBJS)
 
-$(OUTDIR)/layer_example_f32: $(OUTDIR)/.make $(BLDDIR)/layer_example_f32-c.o $(LIBNAME).$(LIBEXT)
-	$(LD) -o $@ $(BLDDIR)/layer_example_f32-c.o \
+$(OUTDIR)/layer_example_f32: $(OUTDIR)/.make $(BLDDIR)/mm_io-c.o $(BLDDIR)/layer_example_f32-c.o $(LIBNAME).$(LIBEXT)
+	$(LD) -o $@ $(BLDDIR)/layer_example_f32-c.o $(BLDDIR)/mm_io-c.o \
 		$(call abslib,$(LIBNAME).$(LIBEXT)) \
 		$(call abslib,$(LIBNAME)noblas.$(LIBEXT)) \
 		$(SLDFLAGS) $(LDFLAGS) $(CLDFLAGS)

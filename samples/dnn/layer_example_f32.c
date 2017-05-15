@@ -34,9 +34,12 @@
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#include <assert.h>
 #if defined(_OPENMP)
 # include <omp.h>
 #endif
+#include "../../src/libxsmm_main.h"
+#include "mm_io.h"
 
 #if defined(_WIN32) || defined(__CYGWIN__)
 /* note: later on, this leads to (correct but) different than expected norm-values */
@@ -290,6 +293,476 @@ LIBXSMM_INLINE void naive_conv_fp(naive_conv_t* param, const float* input, float
   }
 }
 
+LIBXSMM_INLINE void naive_conv_winograd_fp(naive_conv_t* param, const float* input, float* output, const float* filter)
+{
+  int nImg      = param->nImg;
+  int nIfm      = param->nIfm;
+  int nOfm      = param->nOfm;
+  int ifhp      = param->ifhp;
+  int ifwp      = param->ifwp;
+  int ofhp      = param->ofhp;
+  int ofwp      = param->ofwp;
+  int ifh       = param->ifh;
+  int ifw       = param->ifw;
+  int ofh       = param->ofh;
+  int ofw       = param->ofw;
+  int pad_h     = param->pad_h;
+  int pad_w     = param->pad_w;
+  int pad_h_in  = param->pad_h_in;
+  int pad_w_in  = param->pad_w_in;
+  int pad_h_out = param->pad_h_out;
+  int pad_w_out = param->pad_w_out;
+  int kh        = param->kh;
+  int kw        = param->kw;
+  int stride_h  = param->stride_h;
+  int stride_w  = param->stride_w;
+  printf("pad_h = %d pad_w = %d pad_h_in = %d pad_w_in = %d pad_h_out = %d pad_w_out = %d\n", pad_h, pad_w, pad_h_in, pad_w_in, pad_h_out, pad_w_out);
+  /* loop counters */
+  int img;
+
+  const int ALPHA = 6;
+  const int itiles = 4;
+  const int jtiles = 4;
+
+  LIBXSMM_VLA_DECL(4,       float, output_t, output + (pad_w_out * ofwp + pad_h_out), nOfm, ofhp, ofwp);
+  LIBXSMM_VLA_DECL(4, const float, input_t,  input + (pad_w_in * ifwp + pad_h_in), nIfm, ifhp, ifwp);
+  LIBXSMM_VLA_DECL(4, const float, U, filter, ALPHA, nOfm, nIfm);
+
+  float *U_buffer, *V_buffer, *M_buffer;
+  U_buffer = (float *)libxsmm_aligned_malloc(ALPHA*ALPHA*nOfm*nIfm*sizeof(float), 4096);
+  V_buffer = (float *)libxsmm_aligned_malloc(nImg*ALPHA*ALPHA*nIfm*jtiles*itiles*sizeof(float), 4096);
+  M_buffer = (float *)libxsmm_aligned_malloc(nImg*ALPHA*ALPHA*nOfm*jtiles*itiles*sizeof(float), 4096);
+
+  LIBXSMM_VLA_DECL(6, float, V, V_buffer, ALPHA, ALPHA, nIfm, jtiles, itiles);
+
+  float t0, t1, t2, t3, t4, t5;
+
+  float I[ALPHA];
+  float T[ALPHA][ALPHA];
+
+  // input transformation
+  for (img = 0; img < nImg; ++img) {
+    int ifm;
+    for (ifm = 0; ifm < nIfm; ++ifm) {
+      int tj;
+      for (tj = 0; tj < jtiles; ++tj) {
+        int ti;
+        for (ti = 0; ti < itiles; ++ti) {
+          int i;
+          for (i = 0; i < ALPHA; ++i) {
+            int xdim = ti*(ALPHA - 2) + i - pad_w;
+
+            int j;
+            for (j = 0; j < ALPHA; ++j) {
+              int ydim = tj*(ALPHA - 2) + j - pad_h;
+
+              if (ydim >= 0 && ydim < ifh && xdim >= 0 && xdim < ifw) {
+                I[j] = LIBXSMM_VLA_ACCESS(4, input_t, img, ifm, ydim, xdim, nIfm, ifhp, ifwp);
+              }
+              else {
+                I[j] = 0;
+              }
+            }
+
+            t0 = I[4] - 4.0f*I[2];
+            t1 = I[3] - 4.0f*I[1];
+            t2 = I[4] - I[2];
+            t3 = I[3] - I[1];
+            t4 = I[4] - 5.0f*I[2];
+            t5 = I[5] - 5.0f*I[3];
+
+            T[0][i] = t4 + 4.0f*I[0];
+            T[1][i] = t0 + t1;
+            T[2][i] = t0 - t1;
+            T[3][i] = t2 + 2.0f*t3;
+            T[4][i] = t2 - 2.0f*t3;
+            T[5][i] = t5 + 4.0f*I[1];
+          }
+
+          int j;
+          for (j = 0; j < ALPHA; ++j) {
+            t0 = T[j][4] - 4.0f*T[j][2];
+            t1 = T[j][3] - 4.0f*T[j][1];
+            t2 = T[j][4] - T[j][2];
+            t3 = T[j][3] - T[j][1];
+            t4 = T[j][4] - 5.0f*T[j][2];
+            t5 = T[j][5] - 5.0f*T[j][3];
+
+            LIBXSMM_VLA_ACCESS(6, V, img, j, 0, ifm, tj, ti, ALPHA, ALPHA, nIfm, jtiles, itiles) = t4 + 4.0f*T[j][0];
+            LIBXSMM_VLA_ACCESS(6, V, img, j, 1, ifm, tj, ti, ALPHA, ALPHA, nIfm, jtiles, itiles) = t0 + t1;
+            LIBXSMM_VLA_ACCESS(6, V, img, j, 2, ifm, tj, ti, ALPHA, ALPHA, nIfm, jtiles, itiles) = t0 - t1;
+            LIBXSMM_VLA_ACCESS(6, V, img, j, 3, ifm, tj, ti, ALPHA, ALPHA, nIfm, jtiles, itiles) = t2 + 2.0f*t3;
+            LIBXSMM_VLA_ACCESS(6, V, img, j, 4, ifm, tj, ti, ALPHA, ALPHA, nIfm, jtiles, itiles) = t2 - 2.0f*t3;
+            LIBXSMM_VLA_ACCESS(6, V, img, j, 5, ifm, tj, ti, ALPHA, ALPHA, nIfm, jtiles, itiles) = t5 + 4.0f*T[j][1];
+          }
+        } // for each tile
+      }
+    }
+  }
+
+//  // weight transformation
+//  LIBXSMM_VLA_DECL(4, float, U, U_buffer, ALPHA, nOfm, nIfm);
+//
+//  const float rcp4  = 1.0f/4.0f;
+//  const float rcp6  = 1.0f/6.0f;
+//  const float rcp12 = 1.0f/12.0f;
+//  const float rcp24 = 1.0f/24.0f;
+//
+//  int ofm;
+//  for (ofm = 0; ofm < nOfm; ++ofm) {
+//    int ifm;
+//    for (ifm = 0; ifm < nIfm; ++ifm) {
+//      int i;
+//      for (i = 0; i < kh; ++i) {
+//        t0 = rcp6 * LIBXSMM_VLA_ACCESS(4, filter_t, ofm, ifm, 2, i, nIfm, kh, kw);
+//        t1 = -t0 - rcp6*LIBXSMM_VLA_ACCESS(4, filter_t, ofm, ifm, 0, i, nIfm, kh, kw);
+//        t2 = t0 + rcp24*LIBXSMM_VLA_ACCESS(4, filter_t, ofm, ifm, 0, i, nIfm, kh, kw);
+//
+//        T[0][i] = rcp4 * LIBXSMM_VLA_ACCESS(4, filter_t, ofm, ifm, 0, i, nIfm, kh, kw);
+//        T[1][i] = t1 - rcp6*LIBXSMM_VLA_ACCESS(4, filter_t, ofm, ifm, 1, i, nIfm, kh, kw);
+//        T[2][i] = t1 + rcp6*LIBXSMM_VLA_ACCESS(4, filter_t, ofm, ifm, 1, i, nIfm, kh, kw);
+//        T[3][i] = t2 + rcp12*LIBXSMM_VLA_ACCESS(4, filter_t, ofm, ifm, 1, i, nIfm, kh, kw);
+//        T[4][i] = t2 - rcp12*LIBXSMM_VLA_ACCESS(4, filter_t, ofm, ifm, 1, i, nIfm, kh, kw);
+//        T[5][i] = LIBXSMM_VLA_ACCESS(4, filter_t, ofm, ifm, 2, i, nIfm, kh, kw);
+//      }
+//      int j;
+//      for (j = 0; j < ALPHA; ++j) {
+//        t0 = rcp6 * T[j][2];
+//        t1 = -t0 - rcp6*T[j][0];
+//        t2 = t0 + rcp24*T[j][0];
+//
+//        LIBXSMM_VLA_ACCESS(4, U, j, 0, ofm, ifm, ALPHA, nOfm, nIfm) = rcp4 * T[j][0];
+//        LIBXSMM_VLA_ACCESS(4, U, j, 1, ofm, ifm, ALPHA, nOfm, nIfm) = t1 - rcp6*T[j][1];
+//        LIBXSMM_VLA_ACCESS(4, U, j, 2, ofm, ifm, ALPHA, nOfm, nIfm) = t1 + rcp6*T[j][1];
+//        LIBXSMM_VLA_ACCESS(4, U, j, 3, ofm, ifm, ALPHA, nOfm, nIfm) = t2 + rcp12*T[j][1];
+//        LIBXSMM_VLA_ACCESS(4, U, j, 4, ofm, ifm, ALPHA, nOfm, nIfm) = t2 - rcp12*T[j][1];
+//        LIBXSMM_VLA_ACCESS(4, U, j, 5, ofm, ifm, ALPHA, nOfm, nIfm) = T[j][2];
+//      }
+//    } // for each in/out feature map pair
+//  }
+
+  // gemm
+  LIBXSMM_VLA_DECL(6, float, M, M_buffer, ALPHA, ALPHA, nOfm, jtiles, itiles);
+
+  for (img = 0; img < nImg; ++img) {
+    int j;
+    for (j = 0; j < ALPHA; ++j) {
+      int i;
+      for (i = 0; i < ALPHA; ++i) { // nImg*ALPHA*ALPHA independent GEMMs
+
+        int ofm;
+        for (ofm = 0; ofm < nOfm; ++ofm) {
+          int tj;
+          for (tj = 0; tj < jtiles; ++tj) {
+            int ti;
+            for (ti = 0; ti < itiles; ++ti) {
+              int ifm;
+              float sum = 0;
+              for (ifm = 0; ifm < nIfm; ++ifm) {
+                sum += LIBXSMM_VLA_ACCESS(4, U, j, i, ofm, ifm, ALPHA, nOfm, nIfm)*
+                    LIBXSMM_VLA_ACCESS(6, V, img, j, i, ifm, tj, ti, ALPHA, ALPHA, nIfm, jtiles, itiles);
+              }
+              LIBXSMM_VLA_ACCESS(6, M, img, j, i, ofm, tj, ti, ALPHA, ALPHA, nOfm, jtiles, itiles) = sum;
+            }
+          }
+        }
+
+      }
+    }
+  }
+
+  // output transformation
+  for (img = 0; img < nImg; ++img) {
+    int ofm;
+    for (ofm = 0; ofm < nOfm; ++ofm) {
+      int tj;
+      for (tj = 0; tj < jtiles; ++tj) {
+        int ti;
+        for (ti = 0; ti < itiles; ++ti) {
+          int i;
+          for (i = 0; i < ALPHA; ++i) {
+            int j;
+            for (j = 0; j < ALPHA; ++j) {
+              I[j] = LIBXSMM_VLA_ACCESS(6, M, img, j, i, ofm, tj, ti, ALPHA, ALPHA, nOfm, jtiles, itiles);
+            }
+
+            t0 = I[1] + I[2];
+            t1 = I[3] + I[4];
+            t2 = I[1] - I[2];
+            t3 = I[3] - I[4];
+
+            T[0][i] = t0 + t1 + I[0];
+            T[1][i] = t2 + 2.f*t3;
+            T[2][i] = t0 + 4.f*t1;
+            T[3][i] = t2 + 8.f*t3 + I[5];
+          }
+
+          int j;
+          for (j = 0; j < ALPHA - 2; ++j) {
+            t0 = T[j][1] + T[j][2];
+            t1 = T[j][3] + T[j][4];
+            t2 = T[j][1] - T[j][2];
+            t3 = T[j][3] - T[j][4];
+
+            int ydim = tj*(ALPHA - 2) + j;
+            if (ydim < ofh) {
+              int xdim = ti*(ALPHA - 2);
+
+              if (xdim + 0 < ofw)
+                LIBXSMM_VLA_ACCESS(4, output_t, img, ofm, ydim, xdim + 0, nOfm, ofhp, ofwp) = t0 + t1 + T[j][0];
+              if (xdim + 1 < ofw)
+                LIBXSMM_VLA_ACCESS(4, output_t, img, ofm, ydim, xdim + 1, nOfm, ofhp, ofwp) = t2 + 2.f*t3;
+              if (xdim + 2 < ofw)
+                LIBXSMM_VLA_ACCESS(4, output_t, img, ofm, ydim, xdim + 2, nOfm, ofhp, ofwp) = t0 + 4.f*t1;
+              if (xdim + 3 < ofw)
+                LIBXSMM_VLA_ACCESS(4, output_t, img, ofm, ydim, xdim + 3, nOfm, ofhp, ofwp) = t2 + 8.f*t3 + T[j][5];
+            }
+          }
+        } // for each tile
+      }
+    }
+  }
+
+  libxsmm_free(U_buffer);
+  libxsmm_free(V_buffer);
+  libxsmm_free(M_buffer);
+}
+
+LIBXSMM_INLINE void naive_conv_sparse_winograd_fp(naive_conv_t* param, const float* input, float* output, const int *filter_rowptr, const int *filter_colidx, const float* filter_values)
+{
+  int nImg      = param->nImg;
+  int nIfm      = param->nIfm;
+  int nOfm      = param->nOfm;
+  int ifhp      = param->ifhp;
+  int ifwp      = param->ifwp;
+  int ofhp      = param->ofhp;
+  int ofwp      = param->ofwp;
+  int ifh       = param->ifh;
+  int ifw       = param->ifw;
+  int ofh       = param->ofh;
+  int ofw       = param->ofw;
+  int pad_h     = param->pad_h;
+  int pad_w     = param->pad_w;
+  int pad_h_in  = param->pad_h_in;
+  int pad_w_in  = param->pad_w_in;
+  int pad_h_out = param->pad_h_out;
+  int pad_w_out = param->pad_w_out;
+  int kh        = param->kh;
+  int kw        = param->kw;
+  int stride_h  = param->stride_h;
+  int stride_w  = param->stride_w;
+  /* loop counters */
+  int img;
+
+  const int ALPHA = 6;
+  const int itiles = 4;
+  const int jtiles = 4;
+
+  LIBXSMM_VLA_DECL(4,       float, output_t, output + (pad_w_out * ofwp + pad_h_out), nOfm, ofhp, ofwp);
+  LIBXSMM_VLA_DECL(4, const float, input_t,  input + (pad_w_in * ifwp + pad_h_in), nIfm, ifhp, ifwp);
+
+  float *U_buffer, *V_buffer, *M_buffer;
+  U_buffer = (float *)libxsmm_aligned_malloc(ALPHA*ALPHA*nOfm*nIfm*sizeof(float), 4096);
+  V_buffer = (float *)libxsmm_aligned_malloc(nImg*ALPHA*ALPHA*nIfm*jtiles*itiles*sizeof(float), 4096);
+  M_buffer = (float *)libxsmm_aligned_malloc(nImg*ALPHA*ALPHA*nOfm*jtiles*itiles*sizeof(float), 4096);
+
+  LIBXSMM_VLA_DECL(6, float, V, V_buffer, ALPHA, ALPHA, nIfm, jtiles, itiles);
+
+  float t0, t1, t2, t3, t4, t5;
+
+  float I[ALPHA];
+  float T[ALPHA][ALPHA];
+
+  // input transformation
+  for (img = 0; img < nImg; ++img) {
+    int ifm;
+    for (ifm = 0; ifm < nIfm; ++ifm) {
+      int tj;
+      for (tj = 0; tj < jtiles; ++tj) {
+        int ti;
+        for (ti = 0; ti < itiles; ++ti) {
+          int i;
+          for (i = 0; i < ALPHA; ++i) {
+            int xdim = ti*(ALPHA - 2) + i - pad_w;
+
+            int j;
+            for (j = 0; j < ALPHA; ++j) {
+              int ydim = tj*(ALPHA - 2) + j - pad_h;
+
+              if (ydim >= 0 && ydim < ifh && xdim >= 0 && xdim < ifw) {
+                I[j] = LIBXSMM_VLA_ACCESS(4, input_t, img, ifm, ydim, xdim, nIfm, ifhp, ifwp);
+              }
+              else {
+                I[j] = 0;
+              }
+            }
+
+            t0 = I[4] - 4.0f*I[2];
+            t1 = I[3] - 4.0f*I[1];
+            t2 = I[4] - I[2];
+            t3 = I[3] - I[1];
+            t4 = I[4] - 5.0f*I[2];
+            t5 = I[5] - 5.0f*I[3];
+
+            T[0][i] = t4 + 4.0f*I[0];
+            T[1][i] = t0 + t1;
+            T[2][i] = t0 - t1;
+            T[3][i] = t2 + 2.0f*t3;
+            T[4][i] = t2 - 2.0f*t3;
+            T[5][i] = t5 + 4.0f*I[1];
+          }
+
+          int j;
+          for (j = 0; j < ALPHA; ++j) {
+            t0 = T[j][4] - 4.0f*T[j][2];
+            t1 = T[j][3] - 4.0f*T[j][1];
+            t2 = T[j][4] - T[j][2];
+            t3 = T[j][3] - T[j][1];
+            t4 = T[j][4] - 5.0f*T[j][2];
+            t5 = T[j][5] - 5.0f*T[j][3];
+
+            LIBXSMM_VLA_ACCESS(6, V, img, j, 0, ifm, tj, ti, ALPHA, ALPHA, nIfm, jtiles, itiles) = t4 + 4.0f*T[j][0];
+            LIBXSMM_VLA_ACCESS(6, V, img, j, 1, ifm, tj, ti, ALPHA, ALPHA, nIfm, jtiles, itiles) = t0 + t1;
+            LIBXSMM_VLA_ACCESS(6, V, img, j, 2, ifm, tj, ti, ALPHA, ALPHA, nIfm, jtiles, itiles) = t0 - t1;
+            LIBXSMM_VLA_ACCESS(6, V, img, j, 3, ifm, tj, ti, ALPHA, ALPHA, nIfm, jtiles, itiles) = t2 + 2.0f*t3;
+            LIBXSMM_VLA_ACCESS(6, V, img, j, 4, ifm, tj, ti, ALPHA, ALPHA, nIfm, jtiles, itiles) = t2 - 2.0f*t3;
+            LIBXSMM_VLA_ACCESS(6, V, img, j, 5, ifm, tj, ti, ALPHA, ALPHA, nIfm, jtiles, itiles) = t5 + 4.0f*T[j][1];
+          }
+        } // for each tile
+      }
+    }
+  }
+
+//  // weight transformation
+//  LIBXSMM_VLA_DECL(4, float, U, U_buffer, ALPHA, nOfm, nIfm);
+//
+//  const float rcp4  = 1.0f/4.0f;
+//  const float rcp6  = 1.0f/6.0f;
+//  const float rcp12 = 1.0f/12.0f;
+//  const float rcp24 = 1.0f/24.0f;
+//
+//  int ofm;
+//  for (ofm = 0; ofm < nOfm; ++ofm) {
+//    int ifm;
+//    for (ifm = 0; ifm < nIfm; ++ifm) {
+//      int i;
+//      for (i = 0; i < kh; ++i) {
+//        t0 = rcp6 * LIBXSMM_VLA_ACCESS(4, filter_t, ofm, ifm, 2, i, nIfm, kh, kw);
+//        t1 = -t0 - rcp6*LIBXSMM_VLA_ACCESS(4, filter_t, ofm, ifm, 0, i, nIfm, kh, kw);
+//        t2 = t0 + rcp24*LIBXSMM_VLA_ACCESS(4, filter_t, ofm, ifm, 0, i, nIfm, kh, kw);
+//
+//        T[0][i] = rcp4 * LIBXSMM_VLA_ACCESS(4, filter_t, ofm, ifm, 0, i, nIfm, kh, kw);
+//        T[1][i] = t1 - rcp6*LIBXSMM_VLA_ACCESS(4, filter_t, ofm, ifm, 1, i, nIfm, kh, kw);
+//        T[2][i] = t1 + rcp6*LIBXSMM_VLA_ACCESS(4, filter_t, ofm, ifm, 1, i, nIfm, kh, kw);
+//        T[3][i] = t2 + rcp12*LIBXSMM_VLA_ACCESS(4, filter_t, ofm, ifm, 1, i, nIfm, kh, kw);
+//        T[4][i] = t2 - rcp12*LIBXSMM_VLA_ACCESS(4, filter_t, ofm, ifm, 1, i, nIfm, kh, kw);
+//        T[5][i] = LIBXSMM_VLA_ACCESS(4, filter_t, ofm, ifm, 2, i, nIfm, kh, kw);
+//      }
+//      int j;
+//      for (j = 0; j < ALPHA; ++j) {
+//        t0 = rcp6 * T[j][2];
+//        t1 = -t0 - rcp6*T[j][0];
+//        t2 = t0 + rcp24*T[j][0];
+//
+//        LIBXSMM_VLA_ACCESS(4, U, j, 0, ofm, ifm, ALPHA, nOfm, nIfm) = rcp4 * T[j][0];
+//        LIBXSMM_VLA_ACCESS(4, U, j, 1, ofm, ifm, ALPHA, nOfm, nIfm) = t1 - rcp6*T[j][1];
+//        LIBXSMM_VLA_ACCESS(4, U, j, 2, ofm, ifm, ALPHA, nOfm, nIfm) = t1 + rcp6*T[j][1];
+//        LIBXSMM_VLA_ACCESS(4, U, j, 3, ofm, ifm, ALPHA, nOfm, nIfm) = t2 + rcp12*T[j][1];
+//        LIBXSMM_VLA_ACCESS(4, U, j, 4, ofm, ifm, ALPHA, nOfm, nIfm) = t2 - rcp12*T[j][1];
+//        LIBXSMM_VLA_ACCESS(4, U, j, 5, ofm, ifm, ALPHA, nOfm, nIfm) = T[j][2];
+//      }
+//    } // for each in/out feature map pair
+//  }
+
+  // gemm
+  LIBXSMM_VLA_DECL(6, float, M, M_buffer, ALPHA, ALPHA, nOfm, jtiles, itiles);
+
+  for (img = 0; img < nImg; ++img) {
+    int j;
+    for (j = 0; j < ALPHA; ++j) {
+      int i;
+      for (i = 0; i < ALPHA; ++i) { // nImg*ALPHA*ALPHA independent GEMMs
+
+        int ofm;
+        for (ofm = 0; ofm < nOfm; ++ofm) {
+          int tj;
+          for (tj = 0; tj < jtiles; ++tj) {
+            int ti;
+            for (ti = 0; ti < itiles; ++ti) {
+              float sum = 0;
+              int sparse_row = (j*ALPHA + i)*nOfm + ofm;
+              int k;
+              for (k = filter_rowptr[sparse_row]; k < filter_rowptr[sparse_row + 1]; ++k) {
+                int ifm = filter_colidx[k];
+                sum += filter_values[k]*
+                    LIBXSMM_VLA_ACCESS(6, V, img, j, i, ifm, tj, ti, ALPHA, ALPHA, nIfm, jtiles, itiles);
+              }
+              LIBXSMM_VLA_ACCESS(6, M, img, j, i, ofm, tj, ti, ALPHA, ALPHA, nOfm, jtiles, itiles) = sum;
+            }
+          }
+        }
+
+      }
+    }
+  }
+
+  // output transformation
+  for (img = 0; img < nImg; ++img) {
+    int ofm;
+    for (ofm = 0; ofm < nOfm; ++ofm) {
+      int tj;
+      for (tj = 0; tj < jtiles; ++tj) {
+        int ti;
+        for (ti = 0; ti < itiles; ++ti) {
+          int i;
+          for (i = 0; i < ALPHA; ++i) {
+            int j;
+            for (j = 0; j < ALPHA; ++j) {
+              I[j] = LIBXSMM_VLA_ACCESS(6, M, img, j, i, ofm, tj, ti, ALPHA, ALPHA, nOfm, jtiles, itiles);
+            }
+
+            t0 = I[1] + I[2];
+            t1 = I[3] + I[4];
+            t2 = I[1] - I[2];
+            t3 = I[3] - I[4];
+
+            T[0][i] = t0 + t1 + I[0];
+            T[1][i] = t2 + 2.f*t3;
+            T[2][i] = t0 + 4.f*t1;
+            T[3][i] = t2 + 8.f*t3 + I[5];
+          }
+
+          int j;
+          for (j = 0; j < ALPHA - 2; ++j) {
+            t0 = T[j][1] + T[j][2];
+            t1 = T[j][3] + T[j][4];
+            t2 = T[j][1] - T[j][2];
+            t3 = T[j][3] - T[j][4];
+
+            int ydim = tj*(ALPHA - 2) + j;
+            if (ydim < ofh) {
+              int xdim = ti*(ALPHA - 2);
+
+              if (xdim + 0 < ofw)
+                LIBXSMM_VLA_ACCESS(4, output_t, img, ofm, ydim, xdim + 0, nOfm, ofhp, ofwp) = t0 + t1 + T[j][0];
+              if (xdim + 1 < ofw)
+                LIBXSMM_VLA_ACCESS(4, output_t, img, ofm, ydim, xdim + 1, nOfm, ofhp, ofwp) = t2 + 2.f*t3;
+              if (xdim + 2 < ofw)
+                LIBXSMM_VLA_ACCESS(4, output_t, img, ofm, ydim, xdim + 2, nOfm, ofhp, ofwp) = t0 + 4.f*t1;
+              if (xdim + 3 < ofw)
+                LIBXSMM_VLA_ACCESS(4, output_t, img, ofm, ydim, xdim + 3, nOfm, ofhp, ofwp) = t2 + 8.f*t3 + T[j][5];
+            }
+          }
+        } // for each tile
+      }
+    }
+  }
+
+  libxsmm_free(U_buffer);
+  libxsmm_free(V_buffer);
+  libxsmm_free(M_buffer);
+}
+
 LIBXSMM_INLINE void naive_conv_bp(naive_conv_t* param, float* input, const float* output, const float* filter)
 {
   int nImg      = param->nImg;
@@ -434,6 +907,7 @@ int main(int argc, char* argv[])
 #else
   int nThreads = 1;       /* number of threads */
 #endif
+  const char *sparse_filter_file = NULL;
 
   unsigned long long l_start, l_end;
   double l_total = 0.0;
@@ -452,7 +926,7 @@ int main(int argc, char* argv[])
   memset(&norms_upd, 0, sizeof(norms_upd));
 
   if (argc > 1 && !strncmp(argv[1], "-h", 3)) {
-    printf("Usage: %s iters inpWidth inpHeight nImg nIfm nOfm kw kh pad stride type format padding_mode\n", argv[0]);
+    printf("Usage: %s iters inpWidth inpHeight nImg nIfm nOfm kw kh pad stride type format padding_mode [sparse_filter_in_matrix_market_format]\n", argv[0]);
     return 0;
   }
   srand48(1);
@@ -472,6 +946,7 @@ int main(int argc, char* argv[])
   if (argc > i) type       = *(argv[i++]);
   if (argc > i) format     = *(argv[i++]);
   if (argc > i) padding_mode = atoi(argv[i++]);
+  if (argc > i) sparse_filter_file = argv[i++];
 
   if (type != 'A' && type != 'F' && type != 'B' && type != 'U') {
     printf("type needs to be 'A' (All), 'F' (FP only), 'B' (BP only), 'U' (WU only)\n");
@@ -539,6 +1014,14 @@ int main(int argc, char* argv[])
   printf("SIZE Output  (1): %10.2f MiB\n", (double)(1*nOfm*ofhp*ofwp*   sizeof(float))/(1024.0*1024.0) );
   printf("SIZE Weight     : %10.2f MiB\n", (double)(nIfm*nOfm*kw*kh*    sizeof(float))/(1024.0*1024.0) );
 
+  if (kw != kh) {
+    fprintf(stderr, "filter is not square\n");
+    return -1;
+  }
+
+  const int WINOGRAD_TILE_SIZE = 4;
+  int alpha = kw + WINOGRAD_TILE_SIZE - 1;
+
   /* allocate data */
   naive_input           = (float*)libxsmm_aligned_malloc( nImg*nIfm*ifhp*ifwp*sizeof(float), 2097152);
   naive_input_save      = (float*)libxsmm_aligned_malloc( nImg*nIfm*ifhp*ifwp*sizeof(float), 2097152);
@@ -547,19 +1030,116 @@ int main(int argc, char* argv[])
   naive_output_wu       = (float*)libxsmm_aligned_malloc( nImg*nOfm*ofhp*ofwp*sizeof(float), 2097152);
   naive_libxsmm_output  = (float*)libxsmm_aligned_malloc( nImg*nOfm*ofhp*ofwp*sizeof(float), 2097152);
   naive_libxsmm_input   = (float*)libxsmm_aligned_malloc( nImg*nIfm*ifhp*ifwp*sizeof(float), 2097152);
-  naive_filter          = (float*)libxsmm_aligned_malloc( nOfm*nIfm*kh*kw*    sizeof(float), 2097152);
-  naive_filter_save     = (float*)libxsmm_aligned_malloc( nOfm*nIfm*kh*kw*    sizeof(float), 2097152);
-  naive_filter_wu       = (float*)libxsmm_aligned_malloc( nOfm*nIfm*kh*kw*    sizeof(float), 2097152);
-  naive_filter_kcrs     = (float*)libxsmm_aligned_malloc( nOfm*nIfm*kh*kw*    sizeof(float), 2097152);
-  naive_libxsmm_filter  = (float*)libxsmm_aligned_malloc( nOfm*nIfm*kh*kw*    sizeof(float), 2097152);
+  naive_filter          = (float*)libxsmm_aligned_malloc( nOfm*nIfm*alpha*alpha*sizeof(float), 2097152);
+  naive_filter_save     = (float*)libxsmm_aligned_malloc( nOfm*nIfm*alpha*alpha*sizeof(float), 2097152);
+  naive_filter_wu       = (float*)libxsmm_aligned_malloc( nOfm*nIfm*alpha*alpha*sizeof(float), 2097152);
+  naive_filter_kcrs     = (float*)libxsmm_aligned_malloc( nOfm*nIfm*alpha*alpha*sizeof(float), 2097152);
+  naive_libxsmm_filter  = (float*)libxsmm_aligned_malloc( nOfm*nIfm*alpha*alpha*sizeof(float), 2097152);
   input_nhwc            = (float*)libxsmm_aligned_malloc( nImg*nIfm*ifhp*ifwp*sizeof(float), 2097152);
   output_nhwc           = (float*)libxsmm_aligned_malloc( nImg*nOfm*ofhp*ofwp*sizeof(float), 2097152);
   naive_output_nhwc     = (float*)libxsmm_aligned_malloc( nImg*nOfm*ofhp*ofwp*sizeof(float), 2097152);
   naive_input_nhwc      = (float*)libxsmm_aligned_malloc( nImg*nIfm*ifhp*ifwp*sizeof(float), 2097152);
-  filter_rsck           = (float*)libxsmm_aligned_malloc( nOfm*nIfm*kh*kw*    sizeof(float), 2097152);
+  filter_rsck           = (float*)libxsmm_aligned_malloc( nOfm*nIfm*alpha*alpha*sizeof(float), 2097152);
   input_libxsmm         = (float*)libxsmm_aligned_malloc( nImg*nIfm*ifhp*ifwp*sizeof(float), 2097152);
-  filter_libxsmm        = (float*)libxsmm_aligned_malloc( nOfm*nIfm*kh*kw*    sizeof(float), 2097152);
+  filter_libxsmm        = (float*)libxsmm_aligned_malloc( nOfm*nIfm*alpha*alpha*sizeof(float), 2097152);
   output_libxsmm        = (float*)libxsmm_aligned_malloc( nImg*nOfm*ofhp*ofwp*sizeof(float), 2097152);
+
+  float *sparse_values = NULL;
+  int *sparse_rowptr = NULL, *sparse_colidx = NULL;
+  if (sparse_filter_file) {
+
+    FILE *fp = fopen(sparse_filter_file, "r");
+    if (NULL == fp) {
+      fprintf(stderr, "Failed to open file %s\n", sparse_filter_file);
+      return -1;
+    }
+
+    /* read banner */
+    MM_typecode matcode;
+    if (mm_read_banner(fp, &matcode) != 0) {
+      fprintf(stderr, "Could not process Matrix Market banner.\n");
+      fclose(fp);
+      return -1;
+    }
+
+    if (!mm_is_valid(matcode) || mm_is_array(matcode) || mm_is_dense(matcode)) {
+      fprintf(stderr, "Only support sparse and real matrices.\n");
+      fclose(fp);
+      return -1;
+    }
+
+    /* read sizes */
+    int nnz, m, n;
+    if (mm_read_mtx_crd_size(fp, &m, &n, &nnz) != 0) {
+      fprintf(stderr, "Could not read matrix size.\n");
+      fclose(fp);
+      return -1;
+    }
+
+    if (m != alpha) {
+      fprintf(stderr, "Number of rows must be %d but %d given\n", alpha, m);
+      fclose(fp);
+      return -1;
+    }
+
+    if (n != alpha*nOfm*nIfm) {
+      fprintf(stderr, "Number of columns must be %d but %d given\n", alpha*nOfm*nIfm, n);
+    }
+
+    zero_buf(naive_filter, alpha*alpha*nOfm*nIfm);
+
+    int num_sparse_rows = alpha*alpha*nOfm;
+    sparse_rowptr = (int *)libxsmm_aligned_malloc((num_sparse_rows + 1)*sizeof(int), 2097152);
+    memset(sparse_rowptr, 0, sizeof(float)*(num_sparse_rows + 1));
+    sparse_colidx = (int *)libxsmm_aligned_malloc(nnz*sizeof(int), 2097152);
+    sparse_values = (float *)libxsmm_aligned_malloc(nnz*sizeof(float), 2097152);
+
+    int i, j;
+    double re, im;
+    while (mm_read_mtx_crd_entry(fp, &i, &j, &re, &im, matcode) == 0) {
+      if (i > m || j > n || i <= 0 || j <= 0) {
+        fprintf(stderr, "(%d, %d) coordinate is out of range.\n", i, j);
+        fclose(fp);
+        return -1;
+      }
+
+      --i, --j; // adjust to zero-based indexing
+
+      int alphaj = i, alphai = j/nOfm/nIfm, ofm = j/nIfm%nOfm, ifm = j%nIfm;
+      naive_filter[((alphaj*alpha + alphai)*nOfm + ofm)*nIfm + ifm] = re;
+
+      int sparse_row = (alphaj*alpha + alphai)*nOfm + ofm;
+      int sparse_col = ifm;
+
+      ++sparse_rowptr[sparse_row + 1]; // count nnz per row
+    }
+
+    // compute prefix sum
+    for (i = 1; i < num_sparse_rows; ++i) {
+      sparse_rowptr[i + 1] += sparse_rowptr[i];
+    }
+    assert(sparse_rowptr[num_sparse_rows] == nnz);
+
+    int *nnz_per_row = (int *)malloc(num_sparse_rows*sizeof(int));
+    memset(nnz_per_row, 0, num_sparse_rows*sizeof(int));
+
+    for (i = 0; i < num_sparse_rows; ++i) {
+      for (j = 0; j < nIfm; ++j) {
+        float f = naive_filter[i*nIfm + j];
+        if (f != 0.f) {
+          sparse_colidx[sparse_rowptr[i] + nnz_per_row[i]] = j;
+          sparse_values[sparse_rowptr[i] + nnz_per_row[i]] = f;
+          ++nnz_per_row[i];
+        }
+      }
+    }
+
+    for (i = 0; i < num_sparse_rows; ++i) {
+      assert(sparse_rowptr[i + 1] == sparse_rowptr[i] + nnz_per_row[i]);
+    }
+
+    free(nnz_per_row);
+  }
 
   /* initialize data */
   init_buf(naive_input,          nImg*nIfm*ifhp*ifwp, 0, 0);
@@ -570,20 +1150,25 @@ int main(int argc, char* argv[])
   zero_buf(naive_output,         nImg*nOfm*ofhp*ofwp);
   zero_buf(naive_libxsmm_output, nImg*nOfm*ofhp*ofwp);
   zero_buf(naive_libxsmm_input,  nImg*nIfm*ifhp*ifwp);
-  init_buf(naive_filter,         nOfm*nIfm*kh*kw, 0, 0);
-  zero_buf(naive_filter_wu, nOfm*nIfm*kh*kw);
-  zero_buf(naive_libxsmm_filter, nOfm*nIfm*kh*kw);
+  if (NULL == sparse_filter_file) init_buf(naive_filter,         nOfm*nIfm*alpha*alpha, 0, 0);
+  zero_buf(naive_filter_wu, nOfm*nIfm*alpha*alpha);
+  zero_buf(naive_libxsmm_filter, nOfm*nIfm*alpha*alpha);
   naive_copy_NCHW_to_NHWC(naive_input, input_nhwc, nImg, ifhp, ifwp, nIfm);
   zero_buf(output_nhwc,          nImg*nOfm*ofhp*ofwp);
   zero_buf(naive_output_nhwc,    nImg*nOfm*ofhp*ofwp);
   zero_buf(naive_input_nhwc,     nImg*nIfm*ifhp*ifwp);
-  naive_copy_KCRS_to_RSCK(naive_filter, filter_rsck, kh, kw, nIfm, nOfm);
+  naive_copy_KCRS_to_RSCK(naive_filter, filter_rsck, alpha, alpha, nIfm, nOfm);
 
   printf("##########################################\n");
   printf("#         Computing Reference ...        #\n");
   printf("##########################################\n");
   if (type == 'A' || type == 'F') {
-    naive_conv_fp(&naive_param, naive_input, naive_output, naive_filter);
+//    if (sparse_filter_file) {
+//      naive_conv_sparse_winograd_fp(&naive_param, naive_input, naive_output, sparse_rowptr, sparse_colidx, sparse_values);
+//    }
+//    else {
+      naive_conv_winograd_fp(&naive_param, naive_input, naive_output, naive_filter);
+//    }
   }
   if ( (type == 'A' || type == 'B') && (nIfm > 3) ) {
     zero_buf(naive_input,         nImg*nIfm*ifhp*ifwp);
@@ -631,7 +1216,15 @@ int main(int argc, char* argv[])
     conv_desc.datatype = LIBXSMM_DNN_DATATYPE_F32;
 
     libxsmm_handle = libxsmm_dnn_create_conv_layer( conv_desc, &status );
+    if (LIBXSMM_DNN_CONV_ALGO_WINOGRAD == libxsmm_handle->algo) {
+      printf("Using Winograd\n");
+    }
     CHKERR_LIBXSMM_DNN( status );
+    if (sparse_filter_file) {
+      libxsmm_handle->sparse_filter_rowptr = sparse_rowptr;
+      libxsmm_handle->sparse_filter_colidx = sparse_colidx;
+      libxsmm_handle->sparse_filter_values = sparse_values;
+    }
 
     /* The following assignment reuses input for convolution in Winograd domain */
     libxsmm_set_flag_reuseInput( libxsmm_handle, type );
@@ -649,7 +1242,8 @@ int main(int argc, char* argv[])
        own external to the library, @TODO, we plan to add an example here */
     CHKERR_LIBXSMM_DNN( libxsmm_dnn_copyin_buffer( libxsmm_input, (void*)naive_input_save, LIBXSMM_DNN_TENSOR_FORMAT_NCHW ) );
     CHKERR_LIBXSMM_DNN( libxsmm_dnn_zero_buffer( libxsmm_output ) );
-    CHKERR_LIBXSMM_DNN( libxsmm_dnn_copyin_filter( libxsmm_filter, (void*)naive_filter, LIBXSMM_DNN_TENSOR_FORMAT_KCRS ) );
+//    CHKERR_LIBXSMM_DNN( libxsmm_dnn_copyin_filter( libxsmm_filter, (void*)naive_filter, LIBXSMM_DNN_TENSOR_FORMAT_KCRS ) );
+    memcpy(libxsmm_filter->data, naive_filter, sizeof(float)*alpha*alpha*nIfm*nOfm);
 
     /* bind buffers and filter to handle */
     CHKERR_LIBXSMM_DNN( libxsmm_dnn_bind_buffer( libxsmm_handle, libxsmm_input, LIBXSMM_DNN_REGULAR_INPUT ) );
@@ -664,10 +1258,91 @@ int main(int argc, char* argv[])
     CHKERR_LIBXSMM_DNN( libxsmm_dnn_bind_scratch( libxsmm_handle, LIBXSMM_DNN_COMPUTE_KIND_ALL, scratch ) );
 
     if (type == 'A' || type == 'F') {
+      printf("bimg = %d itiles = %d jtiles = %d\n", libxsmm_handle->cwino_fwd.bimg, libxsmm_handle->cwino_fwd.itiles, libxsmm_handle->cwino_fwd.jtiles);
+
       printf("##########################################\n");
       printf("#   Correctness - FWD (custom-Storage)   #\n");
       printf("##########################################\n");
       /* run LIBXSMM convolutions */
+
+      /* relayout input */
+      {
+        const int TDVLEN = libxsmm_input->bfm;
+        const int ALPHA = 6;
+
+        size_t temp_input_size = sizeof(float)*libxsmm_handle->desc.N*libxsmm_handle->blocksifm*TDVLEN*ALPHA*ALPHA*libxsmm_handle->cwino_fwd.jtiles*libxsmm_handle->cwino_fwd.itiles;
+        float *temp = (float*)libxsmm_aligned_malloc(temp_input_size, 2097152);
+
+        LIBXSMM_VLA_DECL(5, const float, input, (const float *)libxsmm_input->data, libxsmm_handle->blocksifm, libxsmm_handle->ifhp, libxsmm_handle->ifwp, TDVLEN);
+        LIBXSMM_VLA_DECL(5, float, t, (const float *)temp, libxsmm_handle->blocksifm*TDVLEN, ALPHA, ALPHA, libxsmm_handle->cwino_fwd.jtiles*libxsmm_handle->cwino_fwd.itiles);
+
+        int img, ifm1, ifm2, tj, ti, ydim, xdim, i, j;
+        for (img = 0; img < libxsmm_handle->desc.N; ++img) {
+          for (ifm1 = 0; ifm1 < libxsmm_handle->blocksifm; ++ifm1) {
+            for (ifm2 = 0; ifm2 < TDVLEN; ++ifm2) {
+              for (tj = 0; tj < libxsmm_handle->cwino_fwd.jtiles; tj++) {
+                for (ti = 0; ti < libxsmm_handle->cwino_fwd.itiles; ti++) { /* for each tile */
+                  /* copy the current tile to temporary buffer I with shape ALPHA*ALPHA*TDVLEN */
+                  for (j = 0; j < ALPHA; j++) {
+                    ydim = tj*(ALPHA - 2) + j - libxsmm_handle->desc.pad_h;
+                    if ((ydim < 0) || (ydim >= libxsmm_handle->desc.H)) {
+                      for (i = 0; i < ALPHA; i++) {
+                        LIBXSMM_VLA_ACCESS(5, t, img, ifm1*TDVLEN + ifm2, j, i, tj*libxsmm_handle->cwino_fwd.itiles + ti, libxsmm_handle->blocksifm*TDVLEN, ALPHA, ALPHA, libxsmm_handle->cwino_fwd.jtiles*libxsmm_handle->cwino_fwd.itiles) = 0.0f;
+                      }
+                    } else {
+                      for (i = 0; i < LIBXSMM_MIN(libxsmm_handle->desc.pad_w - (int)ti*(ALPHA - 2), ALPHA); i++) {
+                        LIBXSMM_VLA_ACCESS(5, t, img, ifm1*TDVLEN + ifm2, j, i, tj*libxsmm_handle->cwino_fwd.itiles + ti, libxsmm_handle->blocksifm*TDVLEN, ALPHA, ALPHA, libxsmm_handle->cwino_fwd.jtiles*libxsmm_handle->cwino_fwd.itiles) = 0.0f;
+                      }
+                      for ( ; i < LIBXSMM_MIN(libxsmm_handle->desc.W + libxsmm_handle->desc.pad_w - (int)ti*(ALPHA - 2), ALPHA); i++) {
+                        xdim = ti*(ALPHA - 2) + i - libxsmm_handle->desc.pad_w;
+                        LIBXSMM_VLA_ACCESS(5, t, img, ifm1*TDVLEN + ifm2, j, i, tj*libxsmm_handle->cwino_fwd.itiles + ti, libxsmm_handle->blocksifm*TDVLEN, ALPHA, ALPHA, libxsmm_handle->cwino_fwd.jtiles*libxsmm_handle->cwino_fwd.itiles) =
+                          LIBXSMM_VLA_ACCESS(5, input, img, ifm1, ydim + libxsmm_handle->desc.pad_h_in, xdim + libxsmm_handle->desc.pad_w_in, ifm2, libxsmm_handle->blocksifm, libxsmm_handle->ifhp, libxsmm_handle->ifwp, TDVLEN);
+                      }
+                      for ( ; i < ALPHA; i++) {
+                        LIBXSMM_VLA_ACCESS(5, t, img, ifm1*TDVLEN + ifm2, j, i, tj*libxsmm_handle->cwino_fwd.itiles + ti, libxsmm_handle->blocksifm*TDVLEN, ALPHA, ALPHA, libxsmm_handle->cwino_fwd.jtiles*libxsmm_handle->cwino_fwd.itiles) = 0.0f;
+                      }
+                    }
+                  }
+                } /* for each tile */
+              }
+            }
+          }
+        }
+//        libxsmm_free(libxsmm_input->data);
+        libxsmm_input->data = temp;
+
+        size_t temp_output_size = sizeof(float)*libxsmm_handle->desc.N*libxsmm_handle->blocksofm*TDVLEN*ALPHA*ALPHA*libxsmm_handle->cwino_fwd.jtiles*libxsmm_handle->cwino_fwd.itiles;
+        temp = (float*)libxsmm_aligned_malloc(temp_output_size, 2097152);
+        memset(temp, 0, temp_output_size);
+//        libxsmm_free(libxsmm_output->data);
+        libxsmm_output->data = temp;
+      }
+
+//#if defined(_OPENMP)
+//# pragma omp parallel
+//#endif
+//      {
+//#if defined(_OPENMP)
+//        const int tid = omp_get_thread_num();
+//#else
+//        const int tid = 0;
+//#endif
+//        CHKERR_LIBXSMM_DNN( libxsmm_dnn_execute_st( libxsmm_handle, LIBXSMM_DNN_COMPUTE_KIND_FWD, 0, tid ) );
+//      }
+//      /* copy out data */
+//      CHKERR_LIBXSMM_DNN( libxsmm_dnn_copyout_buffer( libxsmm_output, (void*)naive_libxsmm_output, LIBXSMM_DNN_TENSOR_FORMAT_NCHW ) );
+//
+////      CHKERR_LIBXSMM_DNN( libxsmm_dnn_copyin_buffer( libxsmm_input, (void*)naive_input_save, LIBXSMM_DNN_TENSOR_FORMAT_NCHW ) );
+////      CHKERR_LIBXSMM_DNN( libxsmm_dnn_zero_buffer( libxsmm_output ) );
+//      CHKERR_LIBXSMM_DNN( libxsmm_dnn_copyin_filter( libxsmm_filter, (void*)naive_filter, LIBXSMM_DNN_TENSOR_FORMAT_KCRS ) );
+//
+//      {
+//        const int TDVLEN = libxsmm_input->bfm;
+//        const int ALPHA = 6;
+//        size_t temp_output_size = sizeof(float)*libxsmm_handle->desc.N*libxsmm_handle->blocksofm*TDVLEN*ALPHA*ALPHA*libxsmm_handle->cwino_fwd.jtiles*libxsmm_handle->cwino_fwd.itiles;
+//        memset(libxsmm_output->data, 0, temp_output_size);
+//      }
+
 #if defined(_OPENMP)
 # pragma omp parallel
 #endif
@@ -677,9 +1352,46 @@ int main(int argc, char* argv[])
 #else
         const int tid = 0;
 #endif
-        CHKERR_LIBXSMM_DNN( libxsmm_dnn_execute_st( libxsmm_handle, LIBXSMM_DNN_COMPUTE_KIND_FWD, 0, tid ) );
+        CHKERR_LIBXSMM_DNN( libxsmm_dnn_execute_st_sparse( libxsmm_handle, LIBXSMM_DNN_COMPUTE_KIND_FWD, 0, tid ) );
       }
-      /* copy out data */
+
+      /* relayout output */
+      {
+        const int TDVLEN = libxsmm_output->bfm;
+        const int ALPHA = 6;
+
+        size_t temp_size = sizeof(float)*libxsmm_handle->desc.N*libxsmm_handle->blocksofm*TDVLEN*ALPHA*ALPHA*libxsmm_handle->cwino_fwd.jtiles*libxsmm_handle->cwino_fwd.itiles;
+        float *temp = (float*)libxsmm_aligned_malloc(temp_size, 2097152);
+
+        LIBXSMM_VLA_DECL(5, const float, output, (const float *)libxsmm_output->data, libxsmm_handle->blocksofm*TDVLEN, ALPHA-2, ALPHA-2, libxsmm_handle->cwino_fwd.jtiles*libxsmm_handle->cwino_fwd.itiles);
+        LIBXSMM_VLA_DECL(5, float, t, (const float *)temp, libxsmm_handle->blocksofm, libxsmm_handle->ifhp, libxsmm_handle->ifwp, TDVLEN);
+
+        int img, ofm1, ofm2, tj, ti, ydim, xdim, i, j;
+        for (img = 0; img < libxsmm_handle->desc.N; ++img) {
+          for (ofm1 = 0; ofm1 < libxsmm_handle->blocksofm; ++ofm1) {
+            for (ofm2 = 0; ofm2 < TDVLEN; ++ofm2) {
+              for (tj = 0; tj < libxsmm_handle->cwino_fwd.jtiles; tj++) {
+                for (ti = 0; ti < libxsmm_handle->cwino_fwd.itiles; ti++) { /* for each tile */
+                  /* copy the current tile to temporary buffer I with shape ALPHA*ALPHA*TDVLEN */
+                  for (j = 0; j < ALPHA-2; j++) {
+                    ydim = tj*(ALPHA - 2) + j;
+                    for (i = 0; i < ALPHA-2; i++) {
+                      xdim = ti*(ALPHA - 2) + i;
+                      if (ydim < libxsmm_handle->ofh && xdim < libxsmm_handle->ofw) {
+                        LIBXSMM_VLA_ACCESS(5, t, img, ofm1, ydim, xdim, ofm2, libxsmm_handle->blocksofm, libxsmm_handle->ifhp, libxsmm_handle->ifwp, TDVLEN) =
+                          LIBXSMM_VLA_ACCESS(5, output, img, ofm1*TDVLEN + ofm2, j, i, tj*libxsmm_handle->cwino_fwd.itiles + ti, libxsmm_handle->blocksofm*TDVLEN, ALPHA-2, ALPHA-2, libxsmm_handle->cwino_fwd.jtiles*libxsmm_handle->cwino_fwd.itiles);
+                      }
+                    }
+                  }
+                } /* for each tile */
+              }
+            }
+          }
+        }
+//        libxsmm_free(libxsmm_output->data);
+        libxsmm_output->data = temp;
+      }
+
       CHKERR_LIBXSMM_DNN( libxsmm_dnn_copyout_buffer( libxsmm_output, (void*)naive_libxsmm_output, LIBXSMM_DNN_TENSOR_FORMAT_NCHW ) );
 
       /* compare */
@@ -758,6 +1470,7 @@ int main(int argc, char* argv[])
     }
 
     if (type == 'A' || type == 'F') {
+
       printf("##########################################\n");
       printf("#   Performance - FWD (custom-Storage)   #\n");
       printf("##########################################\n");
@@ -773,7 +1486,7 @@ int main(int argc, char* argv[])
 #else
           const int tid = 0;
 #endif
-          libxsmm_dnn_execute_st( libxsmm_handle, LIBXSMM_DNN_COMPUTE_KIND_FWD, 0, tid );
+          libxsmm_dnn_execute_st_sparse( libxsmm_handle, LIBXSMM_DNN_COMPUTE_KIND_FWD, 0, tid );
         }
       }
       l_end = libxsmm_timer_tick();
