@@ -1083,8 +1083,14 @@ int main(int argc, char* argv[])
       return -1;
     }
 
+    int ngroups = 1;
     if (n != alpha*nOfm*nIfm) {
-      fprintf(stderr, "Number of columns must be %d but %d given\n", alpha*nOfm*nIfm, n);
+      if (n == alpha*nOfm*nIfm*2) {
+        ngroups = 2;
+      }
+      else {
+        fprintf(stderr, "Number of columns must be %d but %d given\n", alpha*nOfm*nIfm, n);
+      }
     }
 
     zero_buf(naive_filter, alpha*alpha*nOfm*nIfm);
@@ -1106,11 +1112,14 @@ int main(int argc, char* argv[])
 
       --i, --j; // adjust to zero-based indexing
 
-      int alphaj = i, alphai = j/nOfm/nIfm, ofm = j/nIfm%nOfm, ifm = j%nIfm;
+      int alphaj = i, alphai = j/(ngroups*nOfm)/nIfm, ofm = j/nIfm%(ngroups*nOfm), ifm = j%nIfm;
+      if (ofm >= nOfm) continue;
+
       naive_filter[((alphaj*alpha + alphai)*nOfm + ofm)*nIfm + ifm] = re;
 
-      int sparse_row = (ofm*alpha + alphaj)*alpha + alphai;
-//      int sparse_row = (alphaj*alpha + alphai)*nOfm + ofm;
+#define BOFM (1)
+
+      int sparse_row = ((ofm/BOFM*alpha + alphaj)*alpha + alphai)*BOFM + ofm%BOFM;
       int sparse_col = ifm;
 
       ++sparse_rowptr[sparse_row + 1]; // count nnz per row
@@ -1127,7 +1136,7 @@ int main(int argc, char* argv[])
 
     for (i = 0; i < num_sparse_rows; ++i) {
       int ofm = i%nOfm, alphai = i/nOfm%alpha, alphaj = i/nOfm/alpha;
-      int sparse_row = (ofm*alpha + alphaj)*alpha + alphai;
+      int sparse_row = ((ofm/BOFM*alpha + alphaj)*alpha + alphai)*BOFM + ofm%BOFM;
 
       for (j = 0; j < nIfm; ++j) {
         float f = naive_filter[i*nIfm + j];
@@ -1138,6 +1147,8 @@ int main(int argc, char* argv[])
         }
       }
     }
+
+#undef BOFM
 
     for (i = 0; i < num_sparse_rows; ++i) {
       assert(sparse_rowptr[i + 1] == sparse_rowptr[i] + nnz_per_row[i]);
@@ -1477,6 +1488,9 @@ int main(int argc, char* argv[])
     }
 
     if (type == 'A' || type == 'F') {
+
+      // make input and output buffer same
+//      CHKERR_LIBXSMM_DNN( libxsmm_dnn_bind_buffer( libxsmm_handle, libxsmm_input, LIBXSMM_DNN_REGULAR_INPUT ) );
 
       printf("##########################################\n");
       printf("#   Performance - FWD (custom-Storage)   #\n");

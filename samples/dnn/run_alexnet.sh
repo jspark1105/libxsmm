@@ -1,6 +1,6 @@
 #!/bin/bash
 
-if [ $# -ne 4 ]
+if [ $# -ne 7 ]
 then
   echo "Usage: $(basename $0) mb iters numa (1-mcdram/0-DDR) TYPE ('A'-ALL/'F'-FP/'B'-BP/'U'-WU) FORMAT ('A'-ALL/'L'-LIBXSMM/'T'-Tensorflow/'M'-Mixed) padding; using default values; using default values: 256 1000 1 f32 A L 0"
   MB=256
@@ -27,11 +27,14 @@ if [ "" != "$(echo "${CPUFLAGS}" | grep -o avx512er)" ]; then
     NUMACTL="numactl --membind=${NUMA} ${TOOL_COMMAND}"
   fi
 fi
+echo $NUMACTL
 
 # ./layer_example_${BIN} iters inpWidth inpHeight nImg nIfm nOfm kw kh pad stride type
 
-${NUMACTL} ./layer_example_${BIN} ${ITERS} 227 227  ${MB}    3   64 11 11 0 4 ${TYPE} ${FORMAT} ${PAD}
-${NUMACTL} ./layer_example_${BIN} ${ITERS}  27  27  ${MB}   64  192  5  5 2 1 ${TYPE} ${FORMAT} ${PAD}
-${NUMACTL} ./layer_example_${BIN} ${ITERS}  13  13  ${MB}  192  384  3  3 1 1 ${TYPE} ${FORMAT} ${PAD}
-${NUMACTL} ./layer_example_${BIN} ${ITERS}  13  13  ${MB}  384  256  3  3 1 1 ${TYPE} ${FORMAT} ${PAD}
-${NUMACTL} ./layer_example_${BIN} ${ITERS}  13  13  ${MB}  256  256  3  3 1 1 ${TYPE} ${FORMAT} ${PAD}
+#${NUMACTL} ./layer_example_${BIN} ${ITERS} 227 227  ${MB}    3   64 11 11 0 4 ${TYPE} ${FORMAT} ${PAD}
+#${NUMACTL} ./layer_example_${BIN} ${ITERS}  27  27  ${MB}   64  192  5  5 2 1 ${TYPE} ${FORMAT} ${PAD}
+#${NUMACTL} ./layer_example_${BIN} ${ITERS}  13  13  ${MB}  192  384  3  3 1 1 ${TYPE} ${FORMAT} ${PAD}
+${NUMACTL} ./layer_example_${BIN} ${ITERS}  13  13  ${MB}  256  384  3  3 1 1 ${TYPE} ${FORMAT} ${PAD} conv3.mtx
+#${NUMACTL} ./layer_example_${BIN} ${ITERS}  13  13  ${MB}  192  192  3  3 1 1 ${TYPE} ${FORMAT} ${PAD} conv4.mtx
+#${NUMACTL} ./layer_example_${BIN} ${ITERS}  13  13  ${MB}  192  128  3  3 1 1 ${TYPE} ${FORMAT} ${PAD} conv5.mtx
+#${NUMACTL} ./layer_example_${BIN} ${ITERS}  13  13  ${MB}  256  256  3  3 1 1 ${TYPE} ${FORMAT} ${PAD}

@@ -1088,7 +1088,9 @@ LIBXSMM_API_DEFINITION libxsmm_dnn_err_t libxsmm_dnn_internal_create_conv_handle
   /* now architecture specific */
   if ((libxsmm_target_archid == LIBXSMM_X86_AVX512_MIC  ||
       libxsmm_target_archid == LIBXSMM_X86_AVX512_CORE  ||
-      libxsmm_target_archid == LIBXSMM_X86_AVX512_KNM ) &&
+      libxsmm_target_archid == LIBXSMM_X86_AVX512_KNM ||
+      libxsmm_target_archid == LIBXSMM_X86_AVX2 ||
+      libxsmm_target_archid == LIBXSMM_X86_SSE4) &&
       (handle->datatype == LIBXSMM_DNN_DATATYPE_F32) &&
       (handle->datatype_itm == LIBXSMM_DNN_DATATYPE_F32) &&
       (0 == (handle->desc.C % 16) && 0 == (handle->desc.K % 16)) &&
@@ -1307,7 +1309,7 @@ LIBXSMM_API_DEFINITION libxsmm_dnn_err_t libxsmm_dnn_internal_create_conv_handle
         if ((handle->desc.N % 4) == 0) {
           wino_desc_fp.bimg = 1;//4;
         } else if ((handle->desc.N % 2) == 0) {
-          wino_desc_fp.bimg = 2;
+          wino_desc_fp.bimg = 1;//2;
         } else {
           wino_desc_fp.bimg = 1;
         }
@@ -1327,12 +1329,14 @@ LIBXSMM_API_DEFINITION libxsmm_dnn_err_t libxsmm_dnn_internal_create_conv_handle
       /* TODO check JIT errors */
       if (libxsmm_target_archid == LIBXSMM_X86_AVX512_MIC  ||
           libxsmm_target_archid == LIBXSMM_X86_AVX512_CORE ||
-          libxsmm_target_archid == LIBXSMM_X86_AVX512_KNM )
+          libxsmm_target_archid == LIBXSMM_X86_AVX512_KNM  ||
+          libxsmm_target_archid == LIBXSMM_X86_AVX2        ||
+          libxsmm_target_archid == LIBXSMM_X86_SSE4)
       {
-        wino_desc_fp.prefetch = LIBXSMM_CONVOLUTION_PREFETCH_NONE;
-        handle->code_fwd[0].pmm = libxsmm_create_xconv_wino_forward(&wino_desc_fp);
-        wino_desc_fp.prefetch = LIBXSMM_CONVOLUTION_PREFETCH_ALL;
-        handle->code_fwd[1].pmm = libxsmm_create_xconv_wino_forward(&wino_desc_fp);
+//        wino_desc_fp.prefetch = LIBXSMM_CONVOLUTION_PREFETCH_NONE;
+//        handle->code_fwd[0].pmm = libxsmm_create_xconv_wino_forward(&wino_desc_fp);
+//        wino_desc_fp.prefetch = LIBXSMM_CONVOLUTION_PREFETCH_ALL;
+//        handle->code_fwd[1].pmm = libxsmm_create_xconv_wino_forward(&wino_desc_fp);
         /* wino_desc_fp.prefetch = LIBXSMM_CONVOLUTION_PREFETCH_NO_WEIGHT; */
         /* handle->code_fwd[2].pmm = libxsmm_create_xconv_wino_forward(&wino_desc_fp); */
         /* wino_desc_fp.prefetch = LIBXSMM_CONVOLUTION_PREFETCH_NO_OUTPUT; */
@@ -1533,14 +1537,16 @@ LIBXSMM_API_DEFINITION libxsmm_dnn_err_t libxsmm_dnn_internal_create_conv_handle
       /* TODO check JIT errors */
       if (libxsmm_target_archid == LIBXSMM_X86_AVX512_MIC  ||
           libxsmm_target_archid == LIBXSMM_X86_AVX512_CORE ||
-          libxsmm_target_archid == LIBXSMM_X86_AVX512_KNM )
+          libxsmm_target_archid == LIBXSMM_X86_AVX512_KNM  ||
+          libxsmm_target_archid == LIBXSMM_X86_AVX2        ||
+          libxsmm_target_archid == LIBXSMM_X86_SSE4)
       {
         /* NONE */
-        wino_desc_bp.prefetch = LIBXSMM_CONVOLUTION_PREFETCH_NONE;
-        handle->code_bwd[0].pmm = libxsmm_create_xconv_wino_backward(&wino_desc_bp);
-        /* ALL */
-        wino_desc_bp.prefetch = LIBXSMM_CONVOLUTION_PREFETCH_ALL;
-        handle->code_bwd[1].pmm = libxsmm_create_xconv_wino_backward(&wino_desc_bp);
+//        wino_desc_bp.prefetch = LIBXSMM_CONVOLUTION_PREFETCH_NONE;
+//        handle->code_bwd[0].pmm = libxsmm_create_xconv_wino_backward(&wino_desc_bp);
+//        /* ALL */
+//        wino_desc_bp.prefetch = LIBXSMM_CONVOLUTION_PREFETCH_ALL;
+//        handle->code_bwd[1].pmm = libxsmm_create_xconv_wino_backward(&wino_desc_bp);
       } else {
         assert(0/*should not happen*/);
       }
@@ -1746,14 +1752,16 @@ LIBXSMM_API_DEFINITION libxsmm_dnn_err_t libxsmm_dnn_internal_create_conv_handle
       /* TODO check JIT errors */
       if (libxsmm_target_archid == LIBXSMM_X86_AVX512_MIC  ||
           libxsmm_target_archid == LIBXSMM_X86_AVX512_CORE ||
-          libxsmm_target_archid == LIBXSMM_X86_AVX512_KNM )
+          libxsmm_target_archid == LIBXSMM_X86_AVX512_KNM  ||
+          libxsmm_target_archid == LIBXSMM_X86_AVX2        ||
+          libxsmm_target_archid == LIBXSMM_X86_SSE4)
       {
         /* NONE */
-        wino_desc_wu.prefetch = LIBXSMM_CONVOLUTION_PREFETCH_NONE;
-        handle->code_upd[0].pmm = libxsmm_create_xconv_wino_update_weights(&wino_desc_wu);
-        /* ALL */
-        wino_desc_wu.prefetch = LIBXSMM_CONVOLUTION_PREFETCH_ALL;
-        handle->code_upd[1].pmm = libxsmm_create_xconv_wino_update_weights(&wino_desc_wu);
+//        wino_desc_wu.prefetch = LIBXSMM_CONVOLUTION_PREFETCH_NONE;
+//        handle->code_upd[0].pmm = libxsmm_create_xconv_wino_update_weights(&wino_desc_wu);
+//        /* ALL */
+//        wino_desc_wu.prefetch = LIBXSMM_CONVOLUTION_PREFETCH_ALL;
+//        handle->code_upd[1].pmm = libxsmm_create_xconv_wino_update_weights(&wino_desc_wu);
       } else {
         assert(0/*should not happen*/);
       }
